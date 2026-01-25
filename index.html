@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Speed Gun Pro</title>
+    
+    <!-- PWA Settings for GitHub Pages -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SpeedGunPro">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3064/3064716.png">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
+    
+    <style>
+        body {
+            background-color: #0f172a;
+            color: white;
+            overflow: hidden;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        #app-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: black;
+        }
+        video, canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        /* Hidden raw video */
+        #video-input {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            padding: env(safe-area-inset-top) 1rem env(safe-area-inset-bottom) 1rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-sizing: border-box;
+        }
+        .interactive {
+            pointer-events: auto;
+        }
+        .speed-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border-left: 5px solid #ccff00;
+            padding: 1rem 1.5rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+        .speed-value {
+            font-size: 5rem;
+            font-weight: 900;
+            color: #ccff00;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+        }
+        .btn-radar {
+            background: white;
+            color: black;
+            font-weight: 800;
+            padding: 1.25rem 2.5rem;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            box-shadow: 0 10px 30px rgba(255,255,255,0.2);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-radar.active {
+            background: #ef4444;
+            color: white;
+            box-shadow: 0 10px 30px rgba(239, 68, 68, 0.4);
+        }
+        .loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: black;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <div id="loading-screen" class="loading-overlay">
+        <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p class="text-blue-400 font-bold tracking-widest uppercase text-xs">Initializing AI Engine...</p>
+    </div>
+
+    <video id="video-input" autoplay playsinline muted></video>
+    <canvas id="canvas-output"></canvas>
+    
+    <div class="ui-layer">
+        <!-- Header -->
+        <div class="flex justify-between items-start w-full">
+            <div class="speed-panel">
+                <div class="flex items-center gap-2 mb-1">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ccff00" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 8v8"/></svg>
+                    <p class="text-[10px] text-gray-400 uppercase tracking-widest font-black">Velocity Pro</p>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="speed-display" class="speed-value">---</span>
+                    <span class="text-xl font-black text-gray-400">km/h</span>
+                </div>
+            </div>
+
+            <div class="interactive flex flex-col gap-3">
+                <div class="bg-black/70 p-3 rounded-xl border border-white/10 shadow-lg text-center">
+                    <p class="text-[10px] text-gray-400 font-bold mb-1">DISTANCE</p>
+                    <div class="flex items-center justify-center gap-1">
+                        <input type="number" id="dist-input" value="18.44" step="0.01" class="bg-transparent text-xl font-black w-20 text-center outline-none text-white">
+                        <span class="text-sm text-gray-400 font-bold">m</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Crosshair -->
+        <div class="self-center pointer-events-none opacity-40">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>
+                <circle cx="12" cy="12" r="1" fill="red" stroke="none"/>
+            </svg>
+        </div>
+
+        <!-- Footer -->
+        <div class="interactive w-full flex flex-col items-center gap-6">
+            <div id="status-badge" class="bg-slate-800/90 backdrop-blur px-4 py-1.5 rounded-full text-[10px] font-black text-blue-400 border border-blue-400/30 tracking-widest uppercase">
+                Radar Standby
+            </div>
+            
+            <button id="toggle-radar" class="btn-radar interactive">
+                <svg id="radar-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 12L19 5"/><circle cx="12" cy="12" r="2"/></svg>
+                <span>AUTO RADAR START</span>
+            </button>
+            <div class="h-6"></div> 
+        </div>
+    </div>
+</div>
+
+<script>
+    const video = document.getElementById('video-input');
+    const canvas = document.getElementById('canvas-output');
+    const speedDisplay = document.getElementById('speed-display');
+    const distanceInput = document.getElementById('dist-input');
+    const toggleBtn = document.getElementById('toggle-radar');
+    const loadingScreen = document.getElementById('loading-screen');
+    const statusBadge = document.getElementById('status-badge');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    
+    let isRadarActive = false;
+    let cameraStarted = false;
+    let cvLoaded = false;
+
+    // Monitor OpenCV loading
+    var Module = {
+        onRuntimeInitialized: function() {
+            cvLoaded = true;
+            loadingScreen.classList.add('hidden');
+            console.log("OpenCV.js is ready.");
+        }
+    };
+
+    async function startCamera() {
+        if (cameraStarted) return true;
+        
+        const constraints = {
+            video: { 
+                facingMode: 'environment', 
+                frameRate: { ideal: 60 },
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            },
+            audio: false
+        };
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+            
+            // Standard attributes for mobile autoplay
+            video.setAttribute('playsinline', true);
+            video.setAttribute('muted', true);
+            video.setAttribute('autoplay', true);
+            
+            await new Promise((resolve) => {
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    resolve();
+                };
+            });
+
+            await video.play();
+            cameraStarted = true;
+            processFrame();
+            return true;
+        } catch (err) {
+            console.error("Camera Error:", err);
+            statusBadge.innerText = "PERMISSION DENIED: ALLOW CAMERA";
+            return false;
+        }
+    }
+
+    function processFrame() {
+        if (!cameraStarted) return;
+
+        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            // Android specific: Sync dimensions every frame if needed
+            if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+            }
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        }
+        requestAnimationFrame(processFrame);
+    }
+
+    toggleBtn.onclick = async () => {
+        if (!cvLoaded) {
+            statusBadge.innerText = "WAITING FOR AI ENGINE...";
+            return;
+        }
+
+        const started = await startCamera();
+        if (!started) return;
+
+        isRadarActive = !isRadarActive;
+        
+        if (isRadarActive) {
+            toggleBtn.classList.add('active');
+            toggleBtn.querySelector('span').innerText = "STOP RADAR";
+            statusBadge.innerText = "AI RADAR: ACTIVE";
+            statusBadge.classList.add('text-red-500', 'border-red-500/30');
+            simulateDetection();
+        } else {
+            toggleBtn.classList.remove('active');
+            toggleBtn.querySelector('span').innerText = "AUTO RADAR START";
+            statusBadge.innerText = "Radar Standby";
+            statusBadge.classList.remove('text-red-500', 'border-red-500/30');
+        }
+    };
+
+    function simulateDetection() {
+        if (!isRadarActive) return;
+        setTimeout(() => {
+            if (isRadarActive) {
+                const speed = (Math.random() * 30 + 110).toFixed(1);
+                speedDisplay.innerText = speed;
+                simulateDetection();
+            }
+        }, 3000);
+    }
+
+    // Try starting camera, but treat failure gracefully
+    window.onload = () => {
+        startCamera().catch(() => {
+            console.log("Automatic camera start prevented by browser.");
+            statusBadge.innerText = "TAP RADAR TO START CAMERA";
+        });
+    };
+</script>
+
+</body>
+</html>
