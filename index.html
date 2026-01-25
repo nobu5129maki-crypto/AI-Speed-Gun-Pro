@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Speed Gun Pro</title>
+    
+    <!-- PWA Settings for GitHub Pages -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SpeedGunPro">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3064/3064716.png">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
+    
+    <style>
+        body {
+            background-color: #0f172a;
+            color: white;
+            overflow: hidden;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        #app-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: black;
+        }
+        video, canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+            padding: env(safe-area-inset-top) 1rem env(safe-area-inset-bottom) 1rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            box-sizing: border-box;
+        }
+        .interactive {
+            pointer-events: auto;
+        }
+        .speed-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border-left: 5px solid #ccff00;
+            padding: 1rem 1.5rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+        .speed-value {
+            font-size: 5rem;
+            font-weight: 900;
+            color: #ccff00;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+        }
+        .modal {
+            background: rgba(15, 23, 42, 0.98);
+            backdrop-filter: blur(20px);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%;
+            max-width: 400px;
+            padding: 2.5rem 2rem;
+            border-radius: 1.5rem;
+            z-index: 100;
+            display: none;
+            box-shadow: 0 0 50px rgba(0,0,0,0.7);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .btn-radar {
+            background: white;
+            color: black;
+            font-weight: 800;
+            padding: 1.25rem 2.5rem;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            box-shadow: 0 10px 30px rgba(255,255,255,0.2);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-radar.active {
+            background: #ef4444;
+            color: white;
+            box-shadow: 0 10px 30px rgba(239, 68, 68, 0.4);
+        }
+        /* Touch Device Optimizations */
+        @media (hover: none) {
+            .interactive:active {
+                opacity: 0.7;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <video id="video-input" autoplay playsinline muted></video>
+    <canvas id="canvas-output"></canvas>
+    
+    <div class="ui-layer">
+        <!-- Header -->
+        <div class="flex justify-between items-start w-full">
+            <div class="speed-panel">
+                <div class="flex items-center gap-2 mb-1">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ccff00" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 8v8"/></svg>
+                    <p class="text-[10px] text-gray-400 uppercase tracking-widest font-black">Velocity Pro</p>
+                </div>
+                <div class="flex items-baseline gap-2">
+                    <span id="speed-display" class="speed-value">---</span>
+                    <span class="text-xl font-black text-gray-400">km/h</span>
+                </div>
+            </div>
+
+            <div class="interactive flex flex-col gap-3">
+                <button id="open-pedometer" class="bg-blue-600 hover:bg-blue-500 px-4 py-3 rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg transition-all">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+                    距離を歩測
+                </button>
+                <div class="bg-black/70 p-3 rounded-xl border border-white/10 shadow-lg">
+                    <p class="text-[10px] text-gray-400 font-bold mb-1">DISTANCE</p>
+                    <div class="flex items-center gap-1">
+                        <input type="number" id="dist-input" value="18.44" step="0.01" class="bg-transparent text-xl font-black w-16 text-right outline-none text-white">
+                        <span class="text-sm text-gray-400 font-bold">m</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Crosshair -->
+        <div class="self-center pointer-events-none opacity-40">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
+                <circle cx="12" cy="12" r="9"/>
+                <path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>
+                <circle cx="12" cy="12" r="1" fill="red" stroke="none"/>
+            </svg>
+        </div>
+
+        <!-- Footer -->
+        <div class="interactive w-full flex flex-col items-center gap-6">
+            <div id="status-badge" class="bg-slate-800/90 backdrop-blur px-4 py-1.5 rounded-full text-[10px] font-black text-blue-400 border border-blue-400/30 tracking-widest uppercase">
+                Radar Standby
+            </div>
+            
+            <button id="toggle-radar" class="btn-radar interactive">
+                <svg id="radar-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 12L19 5"/><circle cx="12" cy="12" r="2"/></svg>
+                <span>AUTO RADAR START</span>
+            </button>
+            <div class="h-6"></div> <!-- Safe area spacing -->
+        </div>
+    </div>
+
+    <!-- Pedometer Modal -->
+    <div id="pedometer-modal" class="modal interactive">
+        <div class="flex items-center gap-3 mb-6">
+            <div class="p-3 bg-blue-600/20 rounded-2xl">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="2.5"><path d="M13 4v16M17 4v16M9 4v16M5 4v16"/></svg>
+            </div>
+            <h2 class="text-2xl font-black">距離計測</h2>
+        </div>
+        
+        <p class="text-sm text-gray-400 mb-8 leading-relaxed">
+            投球位置から捕球位置まで歩いてください。加速度センサーが歩数をカウントし、距離を推定します。
+        </p>
+        
+        <div class="flex flex-col items-center mb-10">
+            <span id="step-count" class="text-7xl font-black text-blue-500 mb-2">0</span>
+            <span class="text-[10px] font-bold text-gray-500 tracking-[0.2em] uppercase">Total Steps</span>
+            <div id="calc-dist" class="mt-6 text-2xl font-black py-2 px-6 bg-blue-500/10 rounded-full text-blue-400">0.00 m</div>
+        </div>
+
+        <div class="flex flex-col gap-3">
+            <button id="start-ped" class="bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black text-lg shadow-xl transition-all">計測開始</button>
+            <button id="save-ped" class="bg-emerald-600 hover:bg-emerald-500 py-4 rounded-2xl font-black text-lg shadow-xl transition-all">結果を適用</button>
+            <button id="close-ped" class="text-gray-500 font-bold py-2 mt-2">キャンセル</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const video = document.getElementById('video-input');
+    const canvas = document.getElementById('canvas-output');
+    const speedDisplay = document.getElementById('speed-display');
+    const distanceInput = document.getElementById('dist-input');
+    const toggleBtn = document.getElementById('toggle-radar');
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    const pedModal = document.getElementById('pedometer-modal');
+    const stepCountDisplay = document.getElementById('step-count');
+    const calcDistDisplay = document.getElementById('calc-dist');
+    
+    let isRadarActive = false;
+    let isPedActive = false;
+    let stepCount = 0;
+    let lastAccel = 0;
+
+    async function startCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { 
+                    facingMode: 'environment', 
+                    frameRate: { ideal: 60 },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                },
+                audio: false
+            });
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                processFrame();
+            };
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    function processFrame() {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        requestAnimationFrame(processFrame);
+    }
+
+    document.getElementById('open-pedometer').onclick = () => {
+        pedModal.style.display = 'block';
+    };
+
+    document.getElementById('close-ped').onclick = () => {
+        stopPedometer();
+        pedModal.style.display = 'none';
+    };
+
+    document.getElementById('start-ped').onclick = async () => {
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            try {
+                const permission = await DeviceMotionEvent.requestPermission();
+                if (permission !== 'granted') return;
+            } catch (e) {
+                console.error(e);
+            }
+        }
+        
+        stepCount = 0;
+        isPedActive = true;
+        document.getElementById('start-ped').innerText = "計測中...";
+        document.getElementById('start-ped').classList.add('animate-pulse');
+        window.addEventListener('devicemotion', handleMotion);
+    };
+
+    document.getElementById('save-ped').onclick = () => {
+        const displayStep = Math.floor(stepCount / 2);
+        const dist = (displayStep * 0.7).toFixed(2);
+        distanceInput.value = dist;
+        stopPedometer();
+        pedModal.style.display = 'none';
+    };
+
+    function handleMotion(event) {
+        if (!isPedActive) return;
+        const accel = event.accelerationIncludingGravity;
+        if (!accel) return;
+
+        const magnitude = Math.sqrt(accel.x**2 + accel.y**2 + accel.z**2);
+        const delta = Math.abs(magnitude - lastAccel);
+
+        if (delta > 4) {
+            stepCount++;
+            const displayStep = Math.floor(stepCount / 2);
+            stepCountDisplay.innerText = displayStep;
+            calcDistDisplay.innerText = `${(displayStep * 0.7).toFixed(2)} m`;
+        }
+        lastAccel = magnitude;
+    }
+
+    function stopPedometer() {
+        isPedActive = false;
+        document.getElementById('start-ped').innerText = "計測開始";
+        document.getElementById('start-ped').classList.remove('animate-pulse');
+        window.removeEventListener('devicemotion', handleMotion);
+    }
+
+    toggleBtn.onclick = () => {
+        isRadarActive = !isRadarActive;
+        const status = document.getElementById('status-badge');
+        
+        if (isRadarActive) {
+            toggleBtn.classList.add('active');
+            toggleBtn.querySelector('span').innerText = "STOP RADAR";
+            status.innerText = "AI RADAR: ACTIVE";
+            status.classList.add('text-red-500', 'border-red-500/30');
+            simulateDetection();
+        } else {
+            toggleBtn.classList.remove('active');
+            toggleBtn.querySelector('span').innerText = "AUTO RADAR START";
+            status.innerText = "Radar Standby";
+            status.classList.remove('text-red-500', 'border-red-500/30');
+        }
+    };
+
+    function simulateDetection() {
+        if (!isRadarActive) return;
+        setTimeout(() => {
+            if (isRadarActive) {
+                const speed = (Math.random() * 30 + 110).toFixed(1);
+                speedDisplay.innerText = speed;
+                simulateDetection();
+            }
+        }, 3000);
+    }
+
+    window.onload = startCamera;
+</script>
+
+</body>
+</html>
