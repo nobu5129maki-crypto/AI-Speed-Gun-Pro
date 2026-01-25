@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>白髪トラッカー</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: -apple-system, sans-serif; background: #121212; color: white; text-align: center; padding: 20px; }
+        .container { max-width: 400px; margin: auto; background: #1e1e1e; padding: 25px; border-radius: 30px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .result-area { font-size: 2.5rem; color: #4fd1c5; margin: 20px 0; font-weight: bold; }
+        .btn { background: #4fd1c5; color: #121212; padding: 18px; border-radius: 15px; cursor: pointer; display: block; font-weight: bold; margin-bottom: 20px; text-decoration: none; }
+        input[type="file"] { display: none; }
+        .card { background: #2d2d2d; border-radius: 20px; padding: 15px; margin-top: 20px; }
+        .chart-container { margin-top: 20px; height: 200px; }
+        .loading { display: none; color: #4fd1c5; font-weight: bold; margin: 10px; }
+        canvas { width: 100% !important; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2 style="margin-top:0;">白髪トラッカー</h2>
+    
+    <label class="btn">
+        📷 今日の状態を判定
+        <input type="file" accept="image/*" capture="camera" id="camera-input">
+    </label>
+
+    <div id="loading" class="loading">解析中...</div>
+
+    <div id="result-display" style="display:none;" class="card">
+        <div style="font-size: 0.9rem; color: #aaa;">最新の白髪率</div>
+        <div class="result-area"><span id="ratio">0</span>%</div>
+        <p id="advice" style="font-size: 0.9rem;"></p>
+    </div>
+
+    <div class="card">
+        <div style="font-size: 0.9rem; color: #aaa; margin-bottom: 10px;">推移グラフ</div>
+        <div class="chart-container">
+            <canvas id="historyChart"></canvas>
+        </div>
+        <button onclick="clearData()" style="background:none; border:none; color:#666; font-size:0.7rem; margin-top:10px;">履歴をリセット</button>
+    </div>
+</div>
+
+<script>
+    const input = document.getElementById('camera-input');
+    const loading = document.getElementById('loading');
+    const resultDisplay = document.getElementById('result-display');
+    let myChart;
+
+    // 起動時にグラフを表示
+    window.onload = updateChart;
+
+    input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        loading.style.display = 'block';
+        resultDisplay.style.display = 'none';
+
+        const formData = new FormData();
+        formData.append('image', file);
+
+        try {
+            const response = await fetch('/analyze', { method: 'POST', body: formData });
+            const data = await response.json();
+            
+            document.getElementById('ratio').innerText = data.ratio;
+            document.getElementById('advice').innerText = data.advice;
+            resultDisplay.style.display = 'block';
+
+            // データの保存
+            saveData(data.ratio);
+        } catch (err) {
+            alert("通信エラーが発生しました");
+        } finally {
+            loading.style.display = 'none';
+        }
+    };
+
+    // スマホの保存領域（LocalStorage）に記録する
+    function saveData(ratio) {
+        let history = JSON.parse(localStorage.getItem('hairHistory') || '[]');
+        const now = new Date();
+        const dateStr = (now.getMonth() + 1) + '/' + now.getDate();
+        
+        history.push({ date: dateStr, ratio: ratio });
+        
+        // 直近10回分だけ保持
+        if (history.length > 10) history.shift();
+        
+        localStorage.setItem('hairHistory', JSON.stringify(history));
+        updateChart();
+    }
+
+    // グラフを更新する
+    function updateChart() {
+        const history = JSON.parse(localStorage.getItem('hairHistory') || '[]');
+        const ctx = document.getElementById('historyChart').getContext('2d');
+        
+        const labels = history.map(h => h.date);
+        const data = history.map(h => h.ratio);
+
+        if (myChart) myChart.destroy(); // 古いグラフを破棄
+
+        myChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: '白髪率 (%)',
+                    data: data,
+                    borderColor: '#4fd1c5',
+                    backgroundColor: 'rgba(79, 209, 197, 0.2)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, grid: { color: '#333' }, ticks: { color: '#aaa' } },
+                    x: { grid: { display: false }, ticks: { color: '#aaa' } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    function clearData() {
+        if(confirm("全ての履歴を消去しますか？")) {
+            localStorage.removeItem('hairHistory');
+            updateChart();
+            resultDisplay.style.display = 'none';
+        }
+    }
+</script>
+
+</body>
+</html>
