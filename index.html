@@ -68,6 +68,11 @@
             padding: 1rem 1.5rem;
             border-radius: 0.75rem;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            transition: transform 0.1s ease;
+        }
+        .speed-panel.hit {
+            transform: scale(1.05);
+            border-left-color: #ff3e3e;
         }
         .speed-value {
             font-size: 5rem;
@@ -75,6 +80,10 @@
             color: #ccff00;
             line-height: 1;
             font-variant-numeric: tabular-nums;
+        }
+        .speed-value.hit {
+            color: #ffffff;
+            text-shadow: 0 0 20px rgba(204, 255, 0, 0.5);
         }
         .btn-radar {
             background: white;
@@ -103,6 +112,15 @@
             justify-content: center;
             z-index: 50;
         }
+        /* 新記録などのアニメーション用 */
+        @keyframes flash {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        .detecting-anim {
+            animation: flash 0.5s infinite;
+        }
     </style>
 </head>
 <body>
@@ -119,10 +137,10 @@
     <div class="ui-layer">
         <!-- Header -->
         <div class="flex justify-between items-start w-full">
-            <div class="speed-panel">
+            <div id="speed-panel-ui" class="speed-panel">
                 <div class="flex items-center gap-2 mb-1">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ccff00" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 8v8"/></svg>
-                    <p class="text-[10px] text-gray-400 uppercase tracking-widest font-black">計測速度</p>
+                    <p id="label-text" class="text-[10px] text-gray-400 uppercase tracking-widest font-black">計測速度</p>
                 </div>
                 <div class="flex items-baseline gap-2">
                     <span id="speed-display" class="speed-value">---</span>
@@ -143,7 +161,7 @@
 
         <!-- Crosshair -->
         <div class="self-center pointer-events-none opacity-40">
-            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
+            <svg id="crosshair-svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
                 <circle cx="12" cy="12" r="9"/>
                 <path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>
                 <circle cx="12" cy="12" r="1" fill="red" stroke="none"/>
@@ -173,11 +191,14 @@
     const toggleBtn = document.getElementById('toggle-radar');
     const loadingScreen = document.getElementById('loading-screen');
     const statusBadge = document.getElementById('status-badge');
+    const speedPanel = document.getElementById('speed-panel-ui');
+    const labelText = document.getElementById('label-text');
     const ctx = canvas.getContext('2d', { alpha: false });
     
     let isRadarActive = false;
     let cameraStarted = false;
     let cvLoaded = false;
+    let lastResultTime = 0; // 最後に結果を表示した時間
 
     // OpenCVのロード監視
     var Module = {
@@ -263,18 +284,56 @@
             toggleBtn.querySelector('span').innerText = "自動計測スタート";
             statusBadge.innerText = "レーダー待機中";
             statusBadge.classList.remove('text-red-500', 'border-red-500/30');
+            resetDisplay();
         }
     };
 
+    function resetDisplay() {
+        speedDisplay.innerText = "---";
+        speedDisplay.classList.remove('hit');
+        speedPanel.classList.remove('hit');
+        labelText.innerText = "計測速度";
+    }
+
+    // 速度表示を更新する関数（数値をキープするロジック）
+    function updateSpeedDisplay(newSpeed) {
+        const now = Date.now();
+        
+        // 前回の表示から3秒以内は、より速い数値が出た時だけ更新する（最高速キープ）
+        // 3秒以上経っていれば新しい投球として表示
+        const currentVal = parseFloat(speedDisplay.innerText);
+        
+        if (now - lastResultTime > 3000 || isNaN(currentVal) || newSpeed > currentVal) {
+            speedDisplay.innerText = newSpeed.toFixed(1);
+            lastResultTime = now;
+            
+            // ヒット演出（フラッシュ効果）
+            speedPanel.classList.add('hit');
+            speedDisplay.classList.add('hit');
+            labelText.innerText = "検知完了！";
+            
+            // 0.5秒後に演出を戻す
+            setTimeout(() => {
+                speedPanel.classList.remove('hit');
+                labelText.innerText = "最高速度";
+            }, 500);
+        }
+    }
+
     function simulateDetection() {
         if (!isRadarActive) return;
+        
+        // 実際の検知に近い間隔（投球の間隔を想定して3〜5秒おきに1回判定）
+        const nextCheck = Math.random() * 2000 + 3000;
+        
         setTimeout(() => {
             if (isRadarActive) {
-                const speed = (Math.random() * 30 + 110).toFixed(1);
-                speedDisplay.innerText = speed;
+                // ボールが通ったと仮定して速度を生成（80km/h〜150km/h）
+                const speed = Math.random() * 70 + 80;
+                updateSpeedDisplay(speed);
                 simulateDetection();
             }
-        }, 3000);
+        }, nextCheck);
     }
 
     window.onload = () => {
