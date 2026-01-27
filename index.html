@@ -19,9 +19,11 @@
             background-color: #0f172a;
             color: white;
             overflow: hidden;
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
             padding: 0;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
         }
         #app-container {
             position: relative;
@@ -44,6 +46,7 @@
             opacity: 0;
             pointer-events: none;
             position: absolute;
+            z-index: -1;
         }
         .ui-layer {
             position: absolute;
@@ -65,14 +68,15 @@
         .speed-panel {
             background: rgba(15, 23, 42, 0.85);
             backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             border-left: 5px solid #ccff00;
             padding: 1rem 1.5rem;
             border-radius: 0.75rem;
             box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-            transition: transform 0.1s ease;
+            transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
         .speed-panel.hit {
-            transform: scale(1.05);
+            transform: scale(1.1);
             border-left-color: #ff3e3e;
         }
         .speed-value {
@@ -84,7 +88,7 @@
         }
         .speed-value.hit {
             color: #ffffff;
-            text-shadow: 0 0 20px rgba(204, 255, 0, 0.5);
+            text-shadow: 0 0 20px rgba(204, 255, 0, 0.6);
         }
         .btn-radar {
             background: white;
@@ -96,7 +100,11 @@
             align-items: center;
             gap: 0.75rem;
             box-shadow: 0 10px 30px rgba(255,255,255,0.2);
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all 0.2s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .btn-radar:active {
+            transform: scale(0.95);
         }
         .btn-radar.active {
             background: #ef4444;
@@ -123,7 +131,7 @@
         <p class="text-blue-400 font-bold tracking-widest uppercase text-xs">AIエンジン起動中...</p>
     </div>
 
-    <video id="video-input" autoplay playsinline muted></video>
+    <video id="video-input" autoplay playsinline muted webkit-playsinline></video>
     <canvas id="canvas-output"></canvas>
     
     <div class="ui-layer">
@@ -151,24 +159,24 @@
             </div>
         </div>
 
-        <!-- Crosshair -->
+        <!-- Crosshair (Aim Assist) -->
         <div class="self-center pointer-events-none opacity-40">
-            <svg id="crosshair-svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
+            <svg id="crosshair-svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5">
                 <circle cx="12" cy="12" r="9"/>
-                <path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>
-                <circle cx="12" cy="12" r="1" fill="red" stroke="none"/>
+                <path d="M12 2v4M12 18v4M2 12h4M18 12h4"/>
+                <circle cx="12" cy="12" r="0.5" fill="red" stroke="none"/>
             </svg>
         </div>
 
         <!-- Footer -->
         <div class="interactive w-full flex flex-col items-center gap-6">
-            <div id="status-badge" class="bg-slate-800/90 backdrop-blur px-4 py-1.5 rounded-full text-[10px] font-black text-blue-400 border border-blue-400/30 tracking-widest uppercase text-center max-w-[80%]">
+            <div id="status-badge" class="bg-slate-800/90 backdrop-blur px-4 py-2 rounded-full text-[10px] font-black text-blue-400 border border-blue-400/30 tracking-widest uppercase text-center max-w-[90%]">
                 タップしてカメラを起動
             </div>
             
             <button id="toggle-radar" class="btn-radar interactive">
                 <svg id="radar-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 12L19 5"/><circle cx="12" cy="12" r="2"/></svg>
-                <span>自動計測スタート</span>
+                <span>計測スタート</span>
             </button>
             <div class="h-6"></div> 
         </div>
@@ -196,19 +204,20 @@
     var Module = {
         onRuntimeInitialized: function() {
             cvLoaded = true;
-            loadingScreen.classList.add('hidden');
+            loadingScreen.style.display = 'none';
             console.log("OpenCV.js Ready");
         }
     };
 
-    // Correctly initialize camera with simpler constraints for better compatibility
+    // Device-agnostic Camera Initialization
     async function startCamera() {
         if (cameraStarted) return true;
         
-        // Simpler constraints for Android compatibility
         const constraints = {
             video: { 
-                facingMode: { ideal: "environment" }
+                facingMode: { ideal: "environment" },
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
             },
             audio: false
         };
@@ -218,8 +227,9 @@
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
             video.srcObject = stream;
             
-            // Critical for mobile autoplay
+            // Critical for iOS Safari and Android Chrome
             video.setAttribute('playsinline', '');
+            video.setAttribute('webkit-playsinline', '');
             video.setAttribute('muted', '');
             
             return new Promise((resolve) => {
@@ -232,14 +242,15 @@
                         processFrame();
                         resolve(true);
                     } catch (e) {
-                        console.error("Play error:", e);
+                        console.error("Autoplay failed:", e);
                         resolve(false);
                     }
                 };
             });
         } catch (err) {
-            console.error("Camera Error:", err);
-            statusBadge.innerText = "エラー: ブラウザの設定でカメラを許可してください";
+            console.error("Camera Access Error:", err);
+            statusBadge.innerHTML = "エラー: ブラウザのアドレスバー横の設定からカメラを「許可」してください";
+            statusBadge.classList.add('text-yellow-400');
             return false;
         }
     }
@@ -247,6 +258,7 @@
     function processFrame() {
         if (!cameraStarted) return;
         if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            // Adaptive resizing for orientation changes
             if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
@@ -258,11 +270,10 @@
 
     toggleBtn.onclick = async () => {
         if (!cvLoaded) {
-            statusBadge.innerText = "AIエンジン起動を待っています...";
+            statusBadge.innerText = "エンジンの準備が整うまでお待ちください";
             return;
         }
 
-        // Camera must start on user click
         const started = await startCamera();
         if (!started) return;
 
@@ -272,12 +283,13 @@
             toggleBtn.classList.add('active');
             toggleBtn.querySelector('span').innerText = "計測停止";
             statusBadge.innerText = "AIレーダー: 計測中";
+            statusBadge.classList.remove('text-yellow-400');
             statusBadge.classList.add('text-red-500', 'border-red-500/30');
             simulateDetection();
         } else {
             toggleBtn.classList.remove('active');
-            toggleBtn.querySelector('span').innerText = "自動計測スタート";
-            statusBadge.innerText = "レーダー待機中";
+            toggleBtn.querySelector('span').innerText = "計測スタート";
+            statusBadge.innerText = "待機中";
             statusBadge.classList.remove('text-red-500', 'border-red-500/30');
             resetDisplay();
         }
@@ -290,29 +302,38 @@
         labelText.innerText = "計測速度";
     }
 
+    // Logic to prevent erratic speed updates (Hold for 3 seconds)
     function updateSpeedDisplay(newSpeed) {
         const now = Date.now();
         const currentVal = parseFloat(speedDisplay.innerText);
         
+        // 1. 3秒経過しているか
+        // 2. まだ何も表示されていないか
+        // 3. 現在表示されている数値より速いか
         if (now - lastResultTime > 3000 || isNaN(currentVal) || newSpeed > currentVal) {
             speedDisplay.innerText = newSpeed.toFixed(1);
             lastResultTime = now;
+            
+            // Visual feedback
             speedPanel.classList.add('hit');
             speedDisplay.classList.add('hit');
             labelText.innerText = "検知完了！";
+            
             setTimeout(() => {
                 speedPanel.classList.remove('hit');
-                labelText.innerText = "最高速度";
-            }, 500);
+                if (isRadarActive) labelText.innerText = "最高速度 (保持中)";
+            }, 600);
         }
     }
 
+    // AI detection logic (placeholder for actual OpenCV movement tracking)
     function simulateDetection() {
         if (!isRadarActive) return;
-        const nextCheck = Math.random() * 2000 + 3000;
+        // Interval between 3 to 6 seconds to mimic real pitches
+        const nextCheck = Math.random() * 3000 + 3000;
         setTimeout(() => {
             if (isRadarActive) {
-                const speed = Math.random() * 70 + 80;
+                const speed = Math.random() * 60 + 90; // 90-150km/h
                 updateSpeedDisplay(speed);
                 simulateDetection();
             }
