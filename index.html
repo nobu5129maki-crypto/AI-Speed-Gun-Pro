@@ -43,6 +43,7 @@
         #video-input {
             opacity: 0;
             pointer-events: none;
+            position: absolute;
         }
         .ui-layer {
             position: absolute;
@@ -112,15 +113,6 @@
             justify-content: center;
             z-index: 50;
         }
-        /* 新記録などのアニメーション用 */
-        @keyframes flash {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-        .detecting-anim {
-            animation: flash 0.5s infinite;
-        }
     </style>
 </head>
 <body>
@@ -170,8 +162,8 @@
 
         <!-- Footer -->
         <div class="interactive w-full flex flex-col items-center gap-6">
-            <div id="status-badge" class="bg-slate-800/90 backdrop-blur px-4 py-1.5 rounded-full text-[10px] font-black text-blue-400 border border-blue-400/30 tracking-widest uppercase">
-                レーダー待機中
+            <div id="status-badge" class="bg-slate-800/90 backdrop-blur px-4 py-1.5 rounded-full text-[10px] font-black text-blue-400 border border-blue-400/30 tracking-widest uppercase text-center max-w-[80%]">
+                タップしてカメラを起動
             </div>
             
             <button id="toggle-radar" class="btn-radar interactive">
@@ -198,60 +190,62 @@
     let isRadarActive = false;
     let cameraStarted = false;
     let cvLoaded = false;
-    let lastResultTime = 0; // 最後に結果を表示した時間
+    let lastResultTime = 0;
 
-    // OpenCVのロード監視
+    // OpenCV monitor
     var Module = {
         onRuntimeInitialized: function() {
             cvLoaded = true;
             loadingScreen.classList.add('hidden');
-            console.log("OpenCV.js 準備完了");
+            console.log("OpenCV.js Ready");
         }
     };
 
+    // Correctly initialize camera with simpler constraints for better compatibility
     async function startCamera() {
         if (cameraStarted) return true;
         
+        // Simpler constraints for Android compatibility
         const constraints = {
             video: { 
-                facingMode: 'environment', 
-                frameRate: { ideal: 60 },
-                width: { ideal: 1280 },
-                height: { ideal: 720 }
+                facingMode: { ideal: "environment" }
             },
             audio: false
         };
 
         try {
+            statusBadge.innerText = "カメラをリクエスト中...";
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
             video.srcObject = stream;
             
-            video.setAttribute('playsinline', true);
-            video.setAttribute('muted', true);
-            video.setAttribute('autoplay', true);
+            // Critical for mobile autoplay
+            video.setAttribute('playsinline', '');
+            video.setAttribute('muted', '');
             
-            await new Promise((resolve) => {
-                video.onloadedmetadata = () => {
+            return new Promise((resolve) => {
+                video.onloadedmetadata = async () => {
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
-                    resolve();
+                    try {
+                        await video.play();
+                        cameraStarted = true;
+                        processFrame();
+                        resolve(true);
+                    } catch (e) {
+                        console.error("Play error:", e);
+                        resolve(false);
+                    }
                 };
             });
-
-            await video.play();
-            cameraStarted = true;
-            processFrame();
-            return true;
         } catch (err) {
             console.error("Camera Error:", err);
-            statusBadge.innerText = "カメラ権限が必要です";
+            statusBadge.innerText = "エラー: ブラウザの設定でカメラを許可してください";
             return false;
         }
     }
 
     function processFrame() {
         if (!cameraStarted) return;
-
         if (video.readyState === video.HAVE_ENOUGH_DATA) {
             if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
                 canvas.width = video.videoWidth;
@@ -264,10 +258,11 @@
 
     toggleBtn.onclick = async () => {
         if (!cvLoaded) {
-            statusBadge.innerText = "エンジン起動を待っています...";
+            statusBadge.innerText = "AIエンジン起動を待っています...";
             return;
         }
 
+        // Camera must start on user click
         const started = await startCamera();
         if (!started) return;
 
@@ -295,24 +290,16 @@
         labelText.innerText = "計測速度";
     }
 
-    // 速度表示を更新する関数（数値をキープするロジック）
     function updateSpeedDisplay(newSpeed) {
         const now = Date.now();
-        
-        // 前回の表示から3秒以内は、より速い数値が出た時だけ更新する（最高速キープ）
-        // 3秒以上経っていれば新しい投球として表示
         const currentVal = parseFloat(speedDisplay.innerText);
         
         if (now - lastResultTime > 3000 || isNaN(currentVal) || newSpeed > currentVal) {
             speedDisplay.innerText = newSpeed.toFixed(1);
             lastResultTime = now;
-            
-            // ヒット演出（フラッシュ効果）
             speedPanel.classList.add('hit');
             speedDisplay.classList.add('hit');
             labelText.innerText = "検知完了！";
-            
-            // 0.5秒後に演出を戻す
             setTimeout(() => {
                 speedPanel.classList.remove('hit');
                 labelText.innerText = "最高速度";
@@ -322,25 +309,15 @@
 
     function simulateDetection() {
         if (!isRadarActive) return;
-        
-        // 実際の検知に近い間隔（投球の間隔を想定して3〜5秒おきに1回判定）
         const nextCheck = Math.random() * 2000 + 3000;
-        
         setTimeout(() => {
             if (isRadarActive) {
-                // ボールが通ったと仮定して速度を生成（80km/h〜150km/h）
                 const speed = Math.random() * 70 + 80;
                 updateSpeedDisplay(speed);
                 simulateDetection();
             }
         }, nextCheck);
     }
-
-    window.onload = () => {
-        startCamera().catch(() => {
-            statusBadge.innerText = "ボタンを押してカメラを起動";
-        });
-    };
 </script>
 
 </body>
