@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI Speed Gun Pro</title>
+    <title>AIスピードガン プロ</title>
     
     <!-- PWA Settings for GitHub Pages -->
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="SpeedGunPro">
+    <meta name="apple-mobile-web-app-title" content="スピードガンPro">
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3064/3064716.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
@@ -110,7 +110,7 @@
 <div id="app-container">
     <div id="loading-screen" class="loading-overlay">
         <div class="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p class="text-blue-400 font-bold tracking-widest uppercase text-xs">Initializing AI Engine...</p>
+        <p class="text-blue-400 font-bold tracking-widest uppercase text-xs">AIエンジン起動中...</p>
     </div>
 
     <video id="video-input" autoplay playsinline muted></video>
@@ -122,7 +122,7 @@
             <div class="speed-panel">
                 <div class="flex items-center gap-2 mb-1">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ccff00" stroke-width="3"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 8v8"/></svg>
-                    <p class="text-[10px] text-gray-400 uppercase tracking-widest font-black">Velocity Pro</p>
+                    <p class="text-[10px] text-gray-400 uppercase tracking-widest font-black">計測速度</p>
                 </div>
                 <div class="flex items-baseline gap-2">
                     <span id="speed-display" class="speed-value">---</span>
@@ -132,7 +132,7 @@
 
             <div class="interactive flex flex-col gap-3">
                 <div class="bg-black/70 p-3 rounded-xl border border-white/10 shadow-lg text-center">
-                    <p class="text-[10px] text-gray-400 font-bold mb-1">DISTANCE</p>
+                    <p class="text-[10px] text-gray-400 font-bold mb-1">計測距離</p>
                     <div class="flex items-center justify-center gap-1">
                         <input type="number" id="dist-input" value="18.44" step="0.01" class="bg-transparent text-xl font-black w-20 text-center outline-none text-white">
                         <span class="text-sm text-gray-400 font-bold">m</span>
@@ -153,12 +153,12 @@
         <!-- Footer -->
         <div class="interactive w-full flex flex-col items-center gap-6">
             <div id="status-badge" class="bg-slate-800/90 backdrop-blur px-4 py-1.5 rounded-full text-[10px] font-black text-blue-400 border border-blue-400/30 tracking-widest uppercase">
-                Radar Standby
+                レーダー待機中
             </div>
             
             <button id="toggle-radar" class="btn-radar interactive">
                 <svg id="radar-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 12L19 5"/><circle cx="12" cy="12" r="2"/></svg>
-                <span>AUTO RADAR START</span>
+                <span>自動計測スタート</span>
             </button>
             <div class="h-6"></div> 
         </div>
@@ -179,12 +179,12 @@
     let cameraStarted = false;
     let cvLoaded = false;
 
-    // Monitor OpenCV loading
+    // OpenCVのロード監視
     var Module = {
         onRuntimeInitialized: function() {
             cvLoaded = true;
             loadingScreen.classList.add('hidden');
-            console.log("OpenCV.js is ready.");
+            console.log("OpenCV.js 準備完了");
         }
     };
 
@@ -205,7 +205,6 @@
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
             video.srcObject = stream;
             
-            // Standard attributes for mobile autoplay
             video.setAttribute('playsinline', true);
             video.setAttribute('muted', true);
             video.setAttribute('autoplay', true);
@@ -224,7 +223,7 @@
             return true;
         } catch (err) {
             console.error("Camera Error:", err);
-            statusBadge.innerText = "PERMISSION DENIED: ALLOW CAMERA";
+            statusBadge.innerText = "カメラ権限が必要です";
             return false;
         }
     }
@@ -233,7 +232,6 @@
         if (!cameraStarted) return;
 
         if (video.readyState === video.HAVE_ENOUGH_DATA) {
-            // Android specific: Sync dimensions every frame if needed
             if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
@@ -245,7 +243,7 @@
 
     toggleBtn.onclick = async () => {
         if (!cvLoaded) {
-            statusBadge.innerText = "WAITING FOR AI ENGINE...";
+            statusBadge.innerText = "エンジン起動を待っています...";
             return;
         }
 
@@ -256,14 +254,14 @@
         
         if (isRadarActive) {
             toggleBtn.classList.add('active');
-            toggleBtn.querySelector('span').innerText = "STOP RADAR";
-            statusBadge.innerText = "AI RADAR: ACTIVE";
+            toggleBtn.querySelector('span').innerText = "計測停止";
+            statusBadge.innerText = "AIレーダー: 計測中";
             statusBadge.classList.add('text-red-500', 'border-red-500/30');
             simulateDetection();
         } else {
             toggleBtn.classList.remove('active');
-            toggleBtn.querySelector('span').innerText = "AUTO RADAR START";
-            statusBadge.innerText = "Radar Standby";
+            toggleBtn.querySelector('span').innerText = "自動計測スタート";
+            statusBadge.innerText = "レーダー待機中";
             statusBadge.classList.remove('text-red-500', 'border-red-500/30');
         }
     };
@@ -279,11 +277,9 @@
         }, 3000);
     }
 
-    // Try starting camera, but treat failure gracefully
     window.onload = () => {
         startCamera().catch(() => {
-            console.log("Automatic camera start prevented by browser.");
-            statusBadge.innerText = "TAP RADAR TO START CAMERA";
+            statusBadge.innerText = "ボタンを押してカメラを起動";
         });
     };
 </script>
