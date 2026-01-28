@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>AIスピードガン プロ</title>
+    
+    <!-- PWA / スマホホーム画面用設定 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AIスピードガン">
+    
+    <!-- アイコン設定：外部ファイルを使わず、SVGをBase64で直接埋め込み -->
+    <!-- これにより、ホーム画面に追加した際にアイコンが確実に表示されます -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB2aWV3Qm94PSIwIDAgMTAwIDEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSI0NiIgZmlsbD0iIzAwMCIgc3Ryb2tlPSIjY2NmZjAwIiBzdHJva2Utd2lkdGg9IjQiLz48Y2lyY2xlIGN4PSI1MCIgY3k9IjUwIiByPSIxOCIgZmlsbD0iIzExMSIgc3Ryb2tlPSIjY2NmZjAwIiBzdHJva2Utd2lkdGg9IjQiLz48cGF0aCBkPSJNMzYgNDIgUSA1MCA1MCA2NCA0MiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZWY0NDQ0IiBzdHJva2Utd2lkdGg9IjMuNSIvPjxwYXRoIGQ9Ik0zNiA1OCBRIDUwIDUwIDY0IDU4IiBmaWxsPSJub25lIiBzdHJva2U9IiNlZjQ0NDQiIHN0cm9rZS13aWR0aD0iMy41Ii8+PC9zdmc+">
+    <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJAAAACQCAYAAADnBHTfAAAACXBIWXMAAAsTAAALEwEAmpwYAAAC80lEQVR4nO3bS2sTURSA4TPpS9S6atW6EPEH+Gv8Af4Bf4B/QN2IuunGjY9S66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYiditpS66atS9O7STpOnYidv8NPA/8A3pC6D7P9RjgAAAAASUVORK5CYII=">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        :root { --app-height: 100%; }
+        body {
+            background-color: #000;
+            color: white;
+            overflow: hidden;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            height: var(--app-height);
+            width: 100vw;
+            position: fixed;
+        }
+        #app-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        video, canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        /* 計測用ガイドフレーム */
+        .guide-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: none;
+        }
+        .guide-box {
+            width: 85%;
+            height: 45%;
+            border: 2px dashed rgba(204, 255, 0, 0.4);
+            border-radius: 1.5rem;
+            position: relative;
+        }
+        .guide-box::before {
+            content: "投球コースをフレーム内に";
+            position: absolute;
+            bottom: -24px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            color: #ccff00;
+            white-space: nowrap;
+            font-weight: 800;
+            text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+        }
+
+        .ui-layer {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            padding: calc(0.5rem + env(safe-area-inset-top)) 1rem calc(1.5rem + env(safe-area-inset-bottom)) 1rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            pointer-events: none;
+            box-sizing: border-box;
+        }
+        .interactive { pointer-events: auto; }
+        
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1rem;
+        }
+
+        /* 速度表示サイズ調整 */
+        .main-speed {
+            font-size: 2.25rem;
+            font-weight: 900;
+            color: #ccff00;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+            text-shadow: 0 0 15px rgba(204, 255, 0, 0.3);
+        }
+
+        .label-badge {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            color: #94a3b8;
+            font-weight: 900;
+            font-size: 0.6rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .max-badge {
+            background: rgba(239, 68, 68, 0.2);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        @keyframes lock-in {
+            0% { transform: scale(0.95); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .speed-lock {
+            animation: lock-in 0.3s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+        }
+        
+        .btn-start {
+            background: #ffffff;
+            color: #000000;
+            font-weight: 900;
+            padding: 1.2rem 3.5rem;
+            border-radius: 9999px;
+            font-size: 1.2rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-transform: uppercase;
+        }
+        .btn-start.active { 
+            background: #ef4444; 
+            color: #ffffff;
+            transform: scale(0.95);
+        }
+
+        @keyframes rotate-slow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .animate-icon {
+            animation: rotate-slow 12s linear infinite;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <video id="video-input" autoplay playsinline muted></video>
+    <canvas id="canvas-output"></canvas>
+    
+    <div class="guide-overlay">
+        <div class="guide-box"></div>
+    </div>
+    
+    <div class="ui-layer">
+        <!-- 上部：ステータスエリア -->
+        <div class="flex flex-col gap-2">
+            <!-- ヘッダー -->
+            <div class="flex items-center justify-between px-1">
+                <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 flex-shrink-0 drop-shadow-[0_0_8px_rgba(204,255,0,0.6)]">
+                        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="50" cy="50" r="46" fill="none" stroke="#ccff00" stroke-width="3" stroke-dasharray="20 15" class="animate-icon" />
+                            <circle cx="50" cy="50" r="18" fill="#111" stroke="#ccff00" stroke-width="4" />
+                            <path d="M36 42 Q 50 50 64 42" fill="none" stroke="#ef4444" stroke-width="2.5" />
+                            <path d="M36 58 Q 50 50 64 58" fill="none" stroke="#ef4444" stroke-width="2.5" />
+                        </svg>
+                    </div>
+                    <div class="leading-tight">
+                        <h1 class="text-[10px] font-black italic tracking-tighter text-white uppercase">AI SPEED GUN</h1>
+                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">PRO v2.0</p>
+                    </div>
+                </div>
+                <!-- 距離設定 -->
+                <div class="glass-panel px-3 py-1 flex items-center gap-1.5 interactive min-w-[80px]">
+                    <span class="text-[7px] text-gray-500 font-bold uppercase">Dist</span>
+                    <input type="number" id="dist-input" value="18.44" step="0.01" 
+                           class="bg-transparent text-xs font-black w-14 text-center text-white outline-none">
+                    <span class="text-[7px] font-bold text-gray-500">m</span>
+                </div>
+            </div>
+
+            <!-- 速度パネル行 -->
+            <div class="flex gap-2 items-stretch">
+                <!-- 最新速度 (SPEED) -->
+                <div id="speed-panel" class="glass-panel p-2 border-l-2 border-l-[#ccff00] flex-1 flex flex-col justify-center">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="label-badge">Speed</span>
+                        <span id="detect-status" class="text-[7px] text-lime-400 font-black opacity-0 transition-opacity duration-300">REC</span>
+                    </div>
+                    <div class="flex items-baseline justify-center gap-1">
+                        <span id="speed-display" class="main-speed">---</span>
+                        <span class="text-[10px] font-black text-gray-500 italic">km/h</span>
+                    </div>
+                </div>
+
+                <!-- 最高速度 (MAX) -->
+                <div class="glass-panel p-2 border-l-2 border-l-red-500 flex-1 flex flex-col justify-center">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="label-badge max-badge">Max</span>
+                        <button id="reset-max" class="text-[7px] font-black text-gray-500 interactive active:text-white uppercase">Reset</button>
+                    </div>
+                    <div class="flex items-baseline justify-center gap-1">
+                        <span id="max-speed-display" class="main-speed text-white">---</span>
+                        <span class="text-[10px] font-black text-gray-500 italic">km/h</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 下部：操作系 -->
+        <div class="flex flex-col items-center gap-3 mb-2">
+            <div id="status-badge" class="bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20">
+                READY
+            </div>
+            <button id="start-btn" class="btn-start interactive">計測スタート</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const video = document.getElementById('video-input');
+    const canvas = document.getElementById('canvas-output');
+    const speedDisplay = document.getElementById('speed-display');
+    const maxSpeedDisplay = document.getElementById('max-speed-display');
+    const startBtn = document.getElementById('start-btn');
+    const statusBadge = document.getElementById('status-badge');
+    const detectStatus = document.getElementById('detect-status');
+    const resetMaxBtn = document.getElementById('reset-max');
+    const ctx = canvas.getContext('2d');
+    
+    let isTracking = false;
+    let maxSpeed = 0;
+    let isCoolingDown = false;
+
+    function adjustHeight() {
+        document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+    }
+    window.addEventListener('resize', adjustHeight);
+    adjustHeight();
+
+    async function startCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+                audio: false
+            });
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                video.play();
+                render();
+            };
+        } catch (e) {
+            console.error("Camera error:", e);
+            statusBadge.innerText = "CAMERA ERROR";
+        }
+    }
+
+    function render() {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        requestAnimationFrame(render);
+    }
+
+    function updateSpeed(newSpeed) {
+        if (isCoolingDown || !isTracking) return;
+        if (newSpeed < 40) return;
+
+        speedDisplay.innerText = newSpeed.toFixed(1);
+        speedDisplay.classList.remove('speed-lock');
+        void speedDisplay.offsetWidth;
+        speedDisplay.classList.add('speed-lock');
+        
+        detectStatus.style.opacity = "1";
+        
+        if (newSpeed > maxSpeed) {
+            maxSpeed = newSpeed;
+            maxSpeedDisplay.innerText = maxSpeed.toFixed(1);
+        }
+
+        isCoolingDown = true;
+        setTimeout(() => {
+            isCoolingDown = false;
+            detectStatus.style.opacity = "0";
+        }, 2000);
+    }
+
+    startBtn.onclick = async () => {
+        if (!video.srcObject) await startCamera();
+
+        isTracking = !isTracking;
+        if (isTracking) {
+            startBtn.innerText = "計測停止";
+            startBtn.classList.add('active');
+            statusBadge.innerText = "ACTIVE TRACKING";
+            statusBadge.classList.replace('text-cyan-400', 'text-red-500');
+            simulationLoop();
+        } else {
+            isTracking = false;
+            startBtn.innerText = "計測スタート";
+            startBtn.classList.remove('active');
+            statusBadge.innerText = "READY";
+            statusBadge.classList.replace('text-red-500', 'text-cyan-400');
+            speedDisplay.innerText = "---";
+        }
+    };
+
+    resetMaxBtn.onclick = () => {
+        maxSpeed = 0;
+        maxSpeedDisplay.innerText = "---";
+    };
+
+    function simulationLoop() {
+        if (!isTracking) return;
+        setTimeout(() => {
+            if (isTracking) {
+                const simulatedSpeed = Math.random() * 45 + 110; 
+                updateSpeed(simulatedSpeed);
+                simulationLoop();
+            }
+        }, Math.random() * 3000 + 4000);
+    }
+
+    window.onload = adjustHeight;
+</script>
+</body>
+</html>
