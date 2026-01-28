@@ -1,0 +1,36 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景（ダークグラデーション） -->
+  <rect width="512" height="512" rx="112" fill="#0F172A"/>
+  
+  <!-- 背面のグローエフェクト -->
+  <circle cx="256" cy="256" r="150" fill="#CCFF00" fill-opacity="0.05"/>
+  
+  <!-- スキャン・レティクル（外周） -->
+  <circle cx="256" cy="256" r="210" stroke="#CCFF00" stroke-width="4" stroke-dasharray="80 40" stroke-opacity="0.3"/>
+  <circle cx="256" cy="256" r="180" stroke="#CCFF00" stroke-width="2" stroke-dasharray="10 20" stroke-opacity="0.5"/>
+
+  <!-- スピード・モーションライン -->
+  <path d="M50 220H150" stroke="#CCFF00" stroke-width="8" stroke-linecap="round" stroke-opacity="0.6"/>
+  <path d="M30 256H120" stroke="#CCFF00" stroke-width="12" stroke-linecap="round"/>
+  <path d="M50 292H150" stroke="#CCFF00" stroke-width="8" stroke-linecap="round" stroke-opacity="0.6"/>
+
+  <!-- 野球ボール本体 -->
+  <circle cx="280" cy="256" r="100" fill="#1E293B" stroke="#CCFF00" stroke-width="6"/>
+  
+  <!-- ボールの縫い目（ネオンレッド） -->
+  <path d="M220 200C240 220 240 292 220 312" stroke="#EF4444" stroke-width="6" stroke-linecap="round"/>
+  <path d="M340 200C320 220 320 292 340 312" stroke="#EF4444" stroke-width="6" stroke-linecap="round"/>
+  
+  <!-- 縫い目のクロスステッチ -->
+  <path d="M228 220L238 215M232 256L242 251M228 292L238 287" stroke="#EF4444" stroke-width="3"/>
+  <path d="M332 220L322 215M328 256L318 251M332 292L322 287" stroke="#EF4444" stroke-width="3"/>
+
+  <!-- ターゲット・ロック（四隅のコーナー） -->
+  <path d="M200 120H140V180" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M360 120H420V180" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M200 392H140V332" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M360 392H420V332" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+
+  <!-- ハイライト・リフレクション -->
+  <path d="M300 190C330 190 350 210 350 240" stroke="white" stroke-width="4" stroke-linecap="round" stroke-opacity="0.4"/>
+</svg>
