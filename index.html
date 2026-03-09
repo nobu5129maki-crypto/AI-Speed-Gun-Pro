@@ -243,15 +243,16 @@
     let lastFrameTime = 0;
     let ballTrack = [];      // {x, y, t} の配列
     let scanStartTime = 0;
+    let triggeredInThisScan = false;
     const visibleFracSelect = document.getElementById('visible-frac');
     
-    // 物理パラメータ（精度向上：異常値の厳格な排除）
+    // 物理パラメータ（計測可能と精度のバランス）
     const MIN_REALISTIC_SPEED = 25;   // 25km/h以下はノイズ
     const MAX_REALISTIC_SPEED = 130;  // 少年野球で130km/h超は誤検知として除外
     const MAX_YOUTH_SPEED = 115;      // 小学生・中学生の現実的上限
-    const MIN_FRAMES_FOR_DETECTION = 8;  // 最低8フレーム以上の追跡が必要
-    const MOTION_THRESHOLD = 35;      // フレーム差分の閾値（上げるとノイズ減）
-    const ANALYSIS_STEP = 6;         // ピクセルサンプリング間隔（性能と精度のバランス）
+    const MIN_FRAMES_FOR_DETECTION = 4;  // 4フレーム以上で計測（ボール通過が速い場合も検出）
+    const MOTION_THRESHOLD = 22;      // フレーム差分の閾値（下げると検出しやすく）
+    const ANALYSIS_STEP = 8;         // サンプリング間隔（大きいと軽量）
 
     function setAppState(state) {
         appState = state;
@@ -282,6 +283,7 @@
                 guideText.innerText = "投球を待機しています...";
                 ballTrack = [];
                 lastFrameData = null;
+                triggeredInThisScan = false;
                 scanStartTime = performance.now();
                 break;
             case 2:
@@ -368,7 +370,7 @@
         const dt = now - lastFrameTime;
         lastFrameTime = now;
 
-        if (count < 15) return null; // ノイズ排除：十分な変化がなければ無視
+        if (count < 6) return null; // ノイズ排除：変化が少なすぎる場合は無視
         return { x: sumX / count, y: sumY / count, t: now, dt };
     }
 
@@ -383,18 +385,18 @@
             progressBar.style.width = progress + "%";
         }
 
-        // 追跡が途切れた時のみ解析（ボール通過完了を検知）
+        // 追跡ポイントが十分あれば解析（途切れた時 or 継続追跡中）
         const idleFrames = ballTrack.length > 0 && !centroid;
-        const maxTrackAge = 200;
+        const maxTrackAge = 250;
         const recentTrack = ballTrack.filter(p => now - p.t < maxTrackAge);
 
-        if (idleFrames && recentTrack.length >= MIN_FRAMES_FOR_DETECTION) {
+        if (!triggeredInThisScan && recentTrack.length >= MIN_FRAMES_FOR_DETECTION) {
             const first = recentTrack[0], last = recentTrack[recentTrack.length - 1];
             const pixelDist = Math.hypot(last.x - first.x, last.y - first.y);
             const timeSec = (last.t - first.t) / 1000;
 
-            // 最低80px以上の移動と0.08秒以上の追跡で信頼性を確保
-            if (timeSec > 0.08 && pixelDist > 80) {
+            // 20px以上・0.03秒以上で計測（速いボールも検出）
+            if (timeSec > 0.03 && pixelDist > 20) {
                 const totalDist = parseFloat(distInput.value) || 18.44;
                 const visibleFrac = parseFloat(visibleFracSelect.value) || 0.33;
                 const visibleDist = totalDist * visibleFrac;
@@ -406,15 +408,16 @@
 
                 let speedKmh = (realDist / timeSec) * 3.6;
 
-                // 横撮影・アップでない場合の補正（過大評価を抑制）
-                if (visibleFrac <= 0.5) speedKmh *= 0.7;
-                if (visibleFrac <= 0.33) speedKmh *= 0.85;
+                // 横撮影・アップでない場合の補正（過大評価を抑制、ただし計測不能にしない）
+                if (visibleFrac <= 0.5) speedKmh *= 0.85;
+                if (visibleFrac <= 0.33) speedKmh *= 0.9;
 
                 // 異常値フィルタ（厳格：小学生140km/h等を排除）
                 if (speedKmh < MIN_REALISTIC_SPEED || speedKmh > MAX_REALISTIC_SPEED) return;
                 if (speedKmh > MAX_YOUTH_SPEED) speedKmh = MAX_YOUTH_SPEED * 0.9;
 
                 if (speedKmh >= MIN_REALISTIC_SPEED && speedKmh <= MAX_REALISTIC_SPEED) {
+                    triggeredInThisScan = true;
                     ballTrack = [];
                     lastFrameData = null;
                     onBallDetected(Math.round(speedKmh * 10) / 10);
