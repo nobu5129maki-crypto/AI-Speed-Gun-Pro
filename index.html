@@ -92,13 +92,6 @@
             pointer-events: auto;
         }
 
-        /* 解析インジケーター */
-        .analyzing-bar {
-            height: 2px;
-            background: #ccff00;
-            width: 0%;
-            transition: width 0.1s linear;
-        }
     </style>
 </head>
 <body>
@@ -159,9 +152,6 @@
                     <div class="flex items-baseline justify-center gap-1">
                         <span id="speed-display" class="main-speed">---</span>
                         <span class="text-[10px] font-black text-gray-400 italic">km/h</span>
-                    </div>
-                    <div class="w-full bg-white/10 h-[2px] mt-2 rounded-full overflow-hidden">
-                        <div id="processing-progress" class="analyzing-bar"></div>
                     </div>
                 </div>
                 <div class="glass-panel p-2 border-l-2 border-l-red-500 flex-1">
@@ -233,7 +223,6 @@
     const holdBadge = document.getElementById('hold-badge');
     const guideFrame = document.getElementById('guide-frame');
     const guideText = document.getElementById('guide-text');
-    const progressBar = document.getElementById('processing-progress');
     const distInput = document.getElementById('dist-input');
     const ctx = canvas.getContext('2d');
     
@@ -269,7 +258,6 @@
                 guideFrame.style.borderColor = "rgba(204, 255, 0, 0.4)";
                 guideText.innerText = "ボールの軌道をこの枠内に収めてください";
                 speedDisplay.innerText = "---";
-                progressBar.style.width = "0%";
                 break;
             case 1:
                 mainBtn.innerText = "スキャン中...";
@@ -380,9 +368,6 @@
 
         if (centroid) {
             ballTrack.push({ x: centroid.x, y: centroid.y, t: centroid.t });
-            // 進捗表示（追跡ポイント数に応じて）
-            const progress = Math.min(95, (ballTrack.length / 20) * 100);
-            progressBar.style.width = progress + "%";
         }
 
         // 追跡ポイントが十分あれば解析（途切れた時 or 継続追跡中）
@@ -434,8 +419,6 @@
     function onBallDetected(speed) {
         if (appState !== 1) return;
         
-        // 数値の確定
-        progressBar.style.width = "100%";
         speedDisplay.innerText = speed.toFixed(1);
         
         if (speed > maxSpeed) {
