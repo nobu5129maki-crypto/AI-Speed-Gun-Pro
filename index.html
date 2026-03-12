@@ -207,6 +207,10 @@
                 <span class="text-[#ccff00]">04</span>
                 <span><b>背景の整理:</b> ボール以外の動く物があると誤検知します。</span>
             </li>
+            <li class="flex gap-3">
+                <span class="text-[#ccff00]">05</span>
+                <span><b>白い壁:</b> 白一色の壁は手ブレで誤検知しやすいです。模様や色のある背景、またはスマホをしっかり固定してください。</span>
+            </li>
         </ul>
         <button id="close-modal" class="w-full mt-6 bg-[#ccff00] text-black font-black py-3 rounded-2xl uppercase text-xs">閉じる</button>
     </div>
@@ -239,9 +243,11 @@
     const MIN_REALISTIC_SPEED = 25;   // 25km/h以下はノイズ
     const MAX_REALISTIC_SPEED = 130;  // 少年野球で130km/h超は誤検知として除外
     const MAX_YOUTH_SPEED = 115;      // 小学生・中学生の現実的上限
-    const MIN_FRAMES_FOR_DETECTION = 4;  // 4フレーム以上で計測（ボール通過が速い場合も検出）
-    const MOTION_THRESHOLD = 22;      // フレーム差分の閾値（下げると検出しやすく）
+    const MIN_FRAMES_FOR_DETECTION = 6;  // 6フレーム以上で計測（手ブレ・白壁の誤検知を抑制）
+    const MOTION_THRESHOLD = 35;      // フレーム差分の閾値（白壁・微妙な動きで誤検知しにくく）
     const ANALYSIS_STEP = 8;         // サンプリング間隔（大きいと軽量）
+    const MIN_MOTION_PIXELS = 12;     // 検出に必要な最小変化ピクセル数（少なすぎるとノイズ）
+    const MAX_MOTION_PIXELS = 800;    // これ以上は画面全体の変化＝手ブレ等と判断
 
     function setAppState(state) {
         appState = state;
@@ -358,8 +364,24 @@
         const dt = now - lastFrameTime;
         lastFrameTime = now;
 
-        if (count < 6) return null; // ノイズ排除：変化が少なすぎる場合は無視
-        return { x: sumX / count, y: sumY / count, t: now, dt };
+        // ノイズ排除：少なすぎ＝ノイズ、多すぎ＝画面全体の変化（手ブレ・白壁の揺れ）
+        if (count < MIN_MOTION_PIXELS || count > MAX_MOTION_PIXELS) return null;
+        return { x: sumX / count, y: sumY / count, t: now, dt, count };
+    }
+
+    // 軌道の直線性を算出（1に近い＝直線的、低い＝ジグザグ・手ブレ）
+    function getTrajectoryLinearity(points) {
+        if (points.length < 3) return 1;
+        let pathLen = 0;
+        for (let i = 1; i < points.length; i++) {
+            pathLen += Math.hypot(points[i].x - points[i-1].x, points[i].y - points[i-1].y);
+        }
+        const directDist = Math.hypot(
+            points[points.length-1].x - points[0].x,
+            points[points.length-1].y - points[0].y
+        );
+        if (pathLen < 1) return 1;
+        return directDist / pathLen;
     }
 
     function processMotion() {
@@ -375,13 +397,20 @@
         const maxTrackAge = 250;
         const recentTrack = ballTrack.filter(p => now - p.t < maxTrackAge);
 
+        // 計測開始直後は無視（カメラの露出調整・初期ノイズ対策）
+        if (now - scanStartTime < 400) return;
+
         if (!triggeredInThisScan && recentTrack.length >= MIN_FRAMES_FOR_DETECTION) {
             const first = recentTrack[0], last = recentTrack[recentTrack.length - 1];
             const pixelDist = Math.hypot(last.x - first.x, last.y - first.y);
             const timeSec = (last.t - first.t) / 1000;
 
-            // 20px以上・0.03秒以上で計測（速いボールも検出）
-            if (timeSec > 0.03 && pixelDist > 20) {
+            // 軌道の直線性チェック（ボールは直線的、手ブレはバラバラ）
+            const linearity = getTrajectoryLinearity(recentTrack);
+            if (linearity < 0.6) return; // 直線的でない＝手ブレの可能性
+
+            // 45px以上・0.05秒以上で計測（白壁の微妙な動きで誤検知しない）
+            if (timeSec > 0.05 && pixelDist > 45) {
                 const totalDist = parseFloat(distInput.value) || 18.44;
                 const visibleFrac = parseFloat(visibleFracSelect.value) || 0.33;
                 const visibleDist = totalDist * visibleFrac;
