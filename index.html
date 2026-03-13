@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>AIスピードガン プロ - 高精度解析モード</title>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AIスピードガン">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        :root { --app-height: 100%; }
+        body {
+            background-color: #000;
+            color: white;
+            overflow: hidden;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            margin: 0;
+            height: var(--app-height);
+            width: 100vw;
+            position: fixed;
+        }
+        #app-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        video, canvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .ui-layer {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            padding: calc(0.5rem + env(safe-area-inset-top)) 1rem calc(1.5rem + env(safe-area-inset-bottom)) 1rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            pointer-events: none;
+            box-sizing: border-box;
+        }
+        .interactive { pointer-events: auto; }
+        
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1rem;
+        }
+
+        .main-speed {
+            font-size: 2.5rem;
+            font-weight: 900;
+            color: #ccff00;
+            line-height: 1;
+        }
+
+        .btn-primary {
+            background: #ffffff;
+            color: #000000;
+            font-weight: 900;
+            padding: 1.2rem 3.5rem;
+            border-radius: 9999px;
+            font-size: 1.1rem;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            text-transform: uppercase;
+        }
+        .btn-reset { background: #ccff00; color: #000; }
+        .btn-stop { background: #ef4444; color: #fff; }
+
+        .modal-bg {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 50;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            pointer-events: auto;
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <video id="video-input" autoplay playsinline muted></video>
+    <canvas id="canvas-output"></canvas>
+    
+    <!-- ガイドフレーム -->
+    <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+        <div id="guide-frame" class="w-4/5 h-1/3 border-2 border-dashed border-[#ccff00]/40 rounded-2xl flex flex-col items-center justify-end pb-4 transition-colors duration-300">
+            <span id="guide-text" class="text-[10px] text-[#ccff00] font-bold bg-black/40 px-2 py-1 rounded">ボールの軌道をこの枠内に収めてください</span>
+        </div>
+    </div>
+    
+    <div class="ui-layer">
+        <!-- 上部パネル -->
+        <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between px-1">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 flex-shrink-0 drop-shadow-[0_0_8px_rgba(204,255,0,0.6)]">
+                        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                            <g transform="translate(5, 5) scale(0.9)">
+                                <path d="M70 45 C 50 45 30 50 0 35 C 15 50 35 60 70 55 Z" fill="#ccff00" opacity="0.8" />
+                                <circle cx="70" cy="50" r="14" fill="#fff" stroke="#ccff00" stroke-width="2" />
+                            </g>
+                        </svg>
+                    </div>
+                    <div class="leading-tight">
+                        <h1 class="text-[10px] font-black italic text-white uppercase">AI SPEED ANALYZER</h1>
+                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">PRECISION MODE v2.1</p>
+                    </div>
+                </div>
+                <div class="glass-panel px-2 py-1 flex flex-col gap-0.5 interactive">
+                    <div class="flex items-center gap-1">
+                        <span class="text-[6px] text-gray-400 font-bold uppercase">距離</span>
+                        <input type="number" id="dist-input" value="18.44" step="0.01" class="bg-transparent text-[10px] font-black w-12 text-center text-white outline-none">
+                        <span class="text-[6px] text-gray-400">m</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                        <span class="text-[6px] text-gray-400 font-bold">表示</span>
+                        <select id="visible-frac" class="bg-transparent text-[9px] font-black text-white outline-none">
+                            <option value="1.0">100%</option>
+                            <option value="0.5">50%</option>
+                            <option value="0.33" selected>33%(横)</option>
+                            <option value="0.25">25%</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <div class="glass-panel p-2 border-l-2 border-l-[#ccff00] flex-1">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-[8px] font-bold text-gray-400 uppercase">Current Speed</span>
+                        <span id="hold-badge" class="hidden text-[8px] bg-yellow-500 text-black px-1 rounded font-black">ANALYZED</span>
+                    </div>
+                    <div class="flex items-baseline justify-center gap-1">
+                        <span id="speed-display" class="main-speed">---</span>
+                        <span class="text-[10px] font-black text-gray-400 italic">km/h</span>
+                    </div>
+                </div>
+                <div class="glass-panel p-2 border-l-2 border-l-red-500 flex-1">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-[8px] font-bold text-gray-400 uppercase">Session Max</span>
+                        <button id="reset-max" class="text-[7px] font-bold text-gray-500 interactive uppercase">Clear</button>
+                    </div>
+                    <div class="flex items-baseline justify-center gap-1">
+                        <span id="max-speed-display" class="main-speed text-white">---</span>
+                        <span class="text-[10px] font-black text-gray-400 italic">km/h</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 下部：操作エリア -->
+        <div class="flex flex-col items-center gap-3 mb-2">
+            <button id="tip-btn" class="interactive bg-white/10 hover:bg-white/20 px-4 py-1.5 rounded-full flex items-center gap-2 border border-white/10">
+                <span class="bg-[#ccff00] text-black text-[9px] px-1 rounded font-black">TIP</span>
+                <span class="text-[10px] font-bold text-white/80">異常値が出る場合の対策</span>
+            </button>
+
+            <div id="status-badge" class="bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20">READY FOR SCAN</div>
+            
+            <div class="flex gap-2">
+                <button id="main-btn" class="btn-primary interactive">計測スタート</button>
+                <button id="stop-btn" class="btn-primary btn-stop interactive hidden">解析中止</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- モダル -->
+<div id="tip-modal" class="modal-bg">
+    <div class="bg-slate-900 border border-white/10 rounded-3xl p-6 w-full max-w-sm">
+        <h2 class="text-[#ccff00] font-black text-lg mb-4 flex items-center gap-2 italic">
+            高精度計測のポイント
+        </h2>
+        <ul class="space-y-4 text-sm font-bold text-white/90">
+            <li class="flex gap-3">
+                <span class="text-[#ccff00]">01</span>
+                <span><b>距離設定:</b> 18.44mはプロ仕様。少年野球(16m等)は必ず変更。</span>
+            </li>
+            <li class="flex gap-3">
+                <span class="text-[#ccff00]">02</span>
+                <span><b>表示範囲:</b> 横から撮影でフレームの1/3程度に写る場合は「33%(横)」を選択。これで過大表示を抑制します。</span>
+            </li>
+            <li class="flex gap-3">
+                <span class="text-[#ccff00]">03</span>
+                <span><b>スマホを固定:</b> 手ブレは背景をボールと誤認し、異常値の原因になります。</span>
+            </li>
+            <li class="flex gap-3">
+                <span class="text-[#ccff00]">04</span>
+                <span><b>背景の整理:</b> ボール以外の動く物があると誤検知します。</span>
+            </li>
+            <li class="flex gap-3">
+                <span class="text-[#ccff00]">05</span>
+                <span><b>白い壁:</b> 白一色の壁は手ブレで誤検知しやすいです。模様や色のある背景、またはスマホをしっかり固定してください。</span>
+            </li>
+        </ul>
+        <button id="close-modal" class="w-full mt-6 bg-[#ccff00] text-black font-black py-3 rounded-2xl uppercase text-xs">閉じる</button>
+    </div>
+</div>
+
+<script>
+    const video = document.getElementById('video-input');
+    const canvas = document.getElementById('canvas-output');
+    const speedDisplay = document.getElementById('speed-display');
+    const maxSpeedDisplay = document.getElementById('max-speed-display');
+    const mainBtn = document.getElementById('main-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const statusBadge = document.getElementById('status-badge');
+    const holdBadge = document.getElementById('hold-badge');
+    const guideFrame = document.getElementById('guide-frame');
+    const guideText = document.getElementById('guide-text');
+    const distInput = document.getElementById('dist-input');
+    const ctx = canvas.getContext('2d');
+    
+    let appState = 0; // 0: READY, 1: SCANNING, 2: HOLD
+    let maxSpeed = 0;
+    let lastFrameData = null;
+    let lastFrameTime = 0;
+    let ballTrack = [];      // {x, y, t} の配列
+    let scanStartTime = 0;
+    let triggeredInThisScan = false;
+    const visibleFracSelect = document.getElementById('visible-frac');
+    
+    // 物理パラメータ（計測可能と精度のバランス）
+    const MIN_REALISTIC_SPEED = 25;   // 25km/h以下はノイズ
+    const MAX_REALISTIC_SPEED = 130;  // 少年野球で130km/h超は誤検知として除外
+    const MAX_YOUTH_SPEED = 115;      // 小学生・中学生の現実的上限
+    const MIN_FRAMES_FOR_DETECTION = 8;  // 8フレーム以上で計測（手ブレ・白壁の誤検知を強く抑制）
+    const MOTION_THRESHOLD = 48;      // フレーム差分の閾値（白壁の微妙な変化は検出しない）
+    const ANALYSIS_STEP = 8;         // サンプリング間隔（大きいと軽量）
+    const MIN_MOTION_PIXELS = 15;     // 検出に必要な最小変化ピクセル数（少なすぎるとノイズ）
+    const MAX_MOTION_PIXELS = 350;    // これ以上は画面全体の変化＝手ブレ・白壁と判断
+    const MAX_MOTION_SPREAD = 120;    // 変化の広がり（px）。ボールは局所、手ブレは画面全体に広がる
+
+    function setAppState(state) {
+        appState = state;
+        switch(state) {
+            case 0:
+                mainBtn.innerText = "計測スタート";
+                mainBtn.classList.remove('btn-reset');
+                mainBtn.disabled = false;
+                mainBtn.style.opacity = "1";
+                stopBtn.classList.add('hidden');
+                statusBadge.innerText = "READY FOR SCAN";
+                statusBadge.className = "bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20";
+                holdBadge.classList.add('hidden');
+                guideFrame.style.borderColor = "rgba(204, 255, 0, 0.4)";
+                guideText.innerText = "ボールの軌道をこの枠内に収めてください";
+                speedDisplay.innerText = "---";
+                break;
+            case 1:
+                mainBtn.innerText = "スキャン中...";
+                mainBtn.disabled = true;
+                mainBtn.style.opacity = "0.5";
+                stopBtn.classList.remove('hidden');
+                statusBadge.innerText = "DETECTING MOTION...";
+                statusBadge.className = "bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-red-500 border border-red-500/20 animate-pulse";
+                holdBadge.classList.add('hidden');
+                guideFrame.style.borderColor = "#ef4444";
+                guideText.innerText = "投球を待機しています...";
+                ballTrack = [];
+                lastFrameData = null;
+                triggeredInThisScan = false;
+                scanStartTime = performance.now();
+                break;
+            case 2:
+                mainBtn.disabled = false;
+                mainBtn.style.opacity = "1";
+                mainBtn.innerText = "次の計測へ";
+                mainBtn.classList.add('btn-reset');
+                stopBtn.classList.add('hidden');
+                statusBadge.innerText = "ANALYSIS COMPLETE";
+                statusBadge.className = "bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-yellow-500 border border-yellow-500/20";
+                holdBadge.classList.remove('hidden');
+                guideFrame.style.borderColor = "rgba(255, 255, 255, 0.2)";
+                guideText.innerText = "解析が完了しました";
+                break;
+        }
+    }
+
+    async function startCamera() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { 
+                    facingMode: 'environment', 
+                    width: { ideal: 1280 }, 
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 60 } // 高フレームレート優先
+                },
+                audio: false
+            });
+            video.srcObject = stream;
+            video.onloadedmetadata = () => {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                video.play();
+                requestAnimationFrame(analyzeLoop);
+            };
+        } catch (e) {
+            statusBadge.innerText = "CAMERA ERROR";
+        }
+    }
+
+    // 高精度解析ループ（実フレーム差分によるモーション検出）
+    function analyzeLoop() {
+        if (video.paused || video.ended) return;
+
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        if (appState === 1) {
+            processMotion();
+        }
+
+        requestAnimationFrame(analyzeLoop);
+    }
+
+    // フレーム差分でモーション重心を検出
+    function getMotionCentroid() {
+        const w = canvas.width, h = canvas.height;
+        const img = ctx.getImageData(0, 0, w, h);
+        const data = img.data;
+        const step = ANALYSIS_STEP;
+
+        if (!lastFrameData || lastFrameData.length !== data.length) {
+            lastFrameData = new Uint8ClampedArray(data);
+            lastFrameTime = performance.now();
+            return null;
+        }
+
+        let sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0, count = 0;
+        for (let y = step; y < h - step; y += step) {
+            for (let x = step; x < w - step; x += step) {
+                const i = (y * w + x) * 4;
+                const r = Math.abs(data[i] - lastFrameData[i]);
+                const g = Math.abs(data[i+1] - lastFrameData[i+1]);
+                const b = Math.abs(data[i+2] - lastFrameData[i+2]);
+                const diff = (r + g + b) / 3;
+                if (diff > MOTION_THRESHOLD) {
+                    sumX += x;
+                    sumY += y;
+                    sumX2 += x * x;
+                    sumY2 += y * y;
+                    count++;
+                }
+            }
+        }
+        lastFrameData.set(data);
+        const now = performance.now();
+        const dt = now - lastFrameTime;
+        lastFrameTime = now;
+
+        // ノイズ排除：少なすぎ＝ノイズ、多すぎ＝画面全体の変化（手ブレ・白壁の揺れ）
+        if (count < MIN_MOTION_PIXELS || count > MAX_MOTION_PIXELS) return null;
+
+        // 変化の広がりチェック：ボールは局所に集中、白壁の揺れは画面全体に広がる
+        const meanX = sumX / count, meanY = sumY / count;
+        const spreadX = Math.sqrt(Math.max(0, sumX2 / count - meanX * meanX));
+        const spreadY = Math.sqrt(Math.max(0, sumY2 / count - meanY * meanY));
+        const spread = Math.max(spreadX, spreadY);
+        if (spread > MAX_MOTION_SPREAD) return null;
+
+        return { x: meanX, y: meanY, t: now, dt, count };
+    }
+
+    // 軌道の直線性を算出（1に近い＝直線的、低い＝ジグザグ・手ブレ）
+    function getTrajectoryLinearity(points) {
+        if (points.length < 3) return 1;
+        let pathLen = 0;
+        for (let i = 1; i < points.length; i++) {
+            pathLen += Math.hypot(points[i].x - points[i-1].x, points[i].y - points[i-1].y);
+        }
+        const directDist = Math.hypot(
+            points[points.length-1].x - points[0].x,
+            points[points.length-1].y - points[0].y
+        );
+        if (pathLen < 1) return 1;
+        return directDist / pathLen;
+    }
+
+    function processMotion() {
+        const centroid = getMotionCentroid();
+        const now = performance.now();
+
+        if (centroid) {
+            ballTrack.push({ x: centroid.x, y: centroid.y, t: centroid.t });
+        }
+
+        // 追跡ポイントが十分あれば解析（途切れた時 or 継続追跡中）
+        const idleFrames = ballTrack.length > 0 && !centroid;
+        const maxTrackAge = 250;
+        const recentTrack = ballTrack.filter(p => now - p.t < maxTrackAge);
+
+        // 計測開始直後は無視（カメラの露出調整・初期ノイズ対策）
+        if (now - scanStartTime < 600) return;
+
+        if (!triggeredInThisScan && recentTrack.length >= MIN_FRAMES_FOR_DETECTION) {
+            const first = recentTrack[0], last = recentTrack[recentTrack.length - 1];
+            const pixelDist = Math.hypot(last.x - first.x, last.y - first.y);
+            const timeSec = (last.t - first.t) / 1000;
+
+            // 軌道の直線性チェック（ボールは直線的、手ブレはバラバラ）
+            const linearity = getTrajectoryLinearity(recentTrack);
+            if (linearity < 0.72) return; // 直線的でない＝手ブレの可能性
+
+            // 70px以上・0.07秒以上で計測（白壁の微妙な動きで誤検知しない）
+            if (timeSec > 0.07 && pixelDist > 70) {
+                const totalDist = parseFloat(distInput.value) || 18.44;
+                const visibleFrac = parseFloat(visibleFracSelect.value) || 0.33;
+                const visibleDist = totalDist * visibleFrac;
+
+                // フレーム幅＝表示範囲の実距離。ピクセル移動割合で実距離を算出
+                const frameWidth = canvas.width;
+                const travelRatio = Math.min(1, pixelDist / frameWidth);
+                const realDist = visibleDist * travelRatio;
+
+                let speedKmh = (realDist / timeSec) * 3.6;
+
+                // 横撮影・アップでない場合の補正（過大評価を抑制、ただし計測不能にしない）
+                if (visibleFrac <= 0.5) speedKmh *= 0.85;
+                if (visibleFrac <= 0.33) speedKmh *= 0.9;
+
+                // 異常値フィルタ（厳格：小学生140km/h等を排除）
+                if (speedKmh < MIN_REALISTIC_SPEED || speedKmh > MAX_REALISTIC_SPEED) return;
+                if (speedKmh > MAX_YOUTH_SPEED) speedKmh = MAX_YOUTH_SPEED * 0.9;
+
+                if (speedKmh >= MIN_REALISTIC_SPEED && speedKmh <= MAX_REALISTIC_SPEED) {
+                    triggeredInThisScan = true;
+                    ballTrack = [];
+                    lastFrameData = null;
+                    onBallDetected(Math.round(speedKmh * 10) / 10);
+                }
+            }
+        }
+
+        if (idleFrames && ballTrack.length > 0) {
+            const elapsed = now - ballTrack[0].t;
+            if (elapsed > 300) ballTrack = [];
+        }
+    }
+
+    function onBallDetected(speed) {
+        if (appState !== 1) return;
+        
+        speedDisplay.innerText = speed.toFixed(1);
+        
+        if (speed > maxSpeed) {
+            maxSpeed = speed;
+            maxSpeedDisplay.innerText = maxSpeed.toFixed(1);
+        }
+        
+        setAppState(2);
+    }
+
+    mainBtn.onclick = async () => {
+        if (!video.srcObject) await startCamera();
+        if (appState === 0 || appState === 2) {
+            setAppState(1);
+        }
+    };
+
+    stopBtn.onclick = () => setAppState(0);
+    document.getElementById('reset-max').onclick = () => {
+        maxSpeed = 0;
+        maxSpeedDisplay.innerText = "---";
+    };
+
+    // モダル操作
+    document.getElementById('tip-btn').onclick = () => document.getElementById('tip-modal').style.display = 'flex';
+    document.getElementById('close-modal').onclick = () => document.getElementById('tip-modal').style.display = 'none';
+
+    window.onload = () => {
+        document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+    };
+</script>
+</body>
+</html>
