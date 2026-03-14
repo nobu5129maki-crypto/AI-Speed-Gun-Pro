@@ -345,15 +345,6 @@
 
         if (appState === 1) {
             processMotion();
-            if (lastMotionPos) {
-                ctx.fillStyle = 'rgba(0,255,0,0.7)';
-                ctx.beginPath();
-                ctx.arc(lastMotionPos.x, lastMotionPos.y, 12, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.strokeStyle = '#00ff00';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            }
         }
 
         requestAnimationFrame(analyzeLoop);
@@ -475,12 +466,12 @@
             const pixelDist = Math.hypot(last.x - first.x, last.y - first.y);
             const timeSec = (last.t - first.t) / 1000;
 
-            // 軌道の直線性（ボールは直線的、手ブレはジグザグ）
+            // 軌道の直線性（ボールは直線的、手ブレはジグザグ）- 緩和して枠内通過時の検出を改善
             const linearity = getTrajectoryLinearity(recentTrack);
-            if (linearity < 0.72) return;
+            if (linearity < 0.6) return;
 
-            // 60px以上・0.05秒以上で計測（手ブレの微細な動きを除外）
-            if (timeSec > 0.05 && pixelDist > 60) {
+            // 50px以上・0.04秒以上で計測（手ブレの微細な動きを除外、枠内通過時の検出を改善）
+            if (timeSec > 0.04 && pixelDist > 50) {
                 const totalDist = parseFloat(distInput.value) || 18.44;
                 const visibleFrac = parseFloat(visibleFracSelect.value) || 0.33;
                 const visibleDist = totalDist * visibleFrac;
