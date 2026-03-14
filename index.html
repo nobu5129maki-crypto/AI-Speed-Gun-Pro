@@ -254,10 +254,10 @@
     // 物理パラメータ（計測可能と精度のバランス）
     const MIN_REALISTIC_SPEED = 15;   // 15km/h以下はノイズ
     const MAX_REALISTIC_SPEED = 200;  // 上限を拡大（大人の投球も計測可能）
-    const MIN_FRAMES_FOR_DETECTION = 4;  // 4フレーム以上（速球でも検出可能、手ブレは2-3フレームで途切れる）
+    const MIN_FRAMES_FOR_DETECTION = 3;  // 4フレーム以上（速球でも検出可能、手ブレは2-3フレームで途切れる）
     const MOTION_THRESHOLD_FRAME = 20;   // フレーム内閾値
     const MOTION_THRESHOLD_GLOBAL = 22;  // 全体閾値（やや緩和してボール検出を優先）
-    const ANALYSIS_STEP = 3;         // サンプリング間隔（細かくして検出感度UP）
+    const ANALYSIS_STEP = 2;         // サンプリング間隔（細かくして検出感度UP）
     const MIN_MOTION_PIXELS = 8;     // 最小変化ピクセル（ノイズ除外を緩和）
     const MAX_MOTION_PIXELS = 450;   // 最大（画面全体の変化＝手ブレと判断）
     const MAX_MOTION_SPREAD = 110;   // 変化の広がり（やや緩和）
