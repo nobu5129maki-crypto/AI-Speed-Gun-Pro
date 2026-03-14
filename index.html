@@ -243,18 +243,20 @@
     let ballTrack = [];      // {x, y, t} の配列
     let scanStartTime = 0;
     let triggeredInThisScan = false;
+    let lastMotionPos = null; // デバッグ用：検出位置
     const visibleFracSelect = document.getElementById('visible-frac');
     
     // 物理パラメータ（計測可能と精度のバランス）
-    const MIN_REALISTIC_SPEED = 25;   // 25km/h以下はノイズ
+    const MIN_REALISTIC_SPEED = 20;   // 20km/h以下はノイズ
     const MAX_REALISTIC_SPEED = 130;  // 少年野球で130km/h超は誤検知として除外
     const MAX_YOUTH_SPEED = 115;      // 小学生・中学生の現実的上限
-    const MIN_FRAMES_FOR_DETECTION = 3;  // 3フレーム以上で計測（速いボールも確実に検出）
-    const MOTION_THRESHOLD = 24;      // フレーム差分の閾値（感度を最大にして検出しやすく）
-    const ANALYSIS_STEP = 4;         // サンプリング間隔（細かくして見逃し防止）
-    const MIN_MOTION_PIXELS = 5;     // 検出に必要な最小変化ピクセル数
-    const MAX_MOTION_PIXELS = 550;   // これ以上は画面全体の変化＝手ブレ・白壁と判断
-    const MAX_MOTION_SPREAD = 200;   // 変化の広がり（px）。ボールは局所、手ブレは画面全体に広がる
+    const MIN_FRAMES_FOR_DETECTION = 2;  // 2フレーム以上で計測（超高速ボールも検出）
+    const MOTION_THRESHOLD_FRAME = 18;   // フレーム内：超低閾値（確実に検出）
+    const MOTION_THRESHOLD_GLOBAL = 22;  // 全体：低閾値
+    const ANALYSIS_STEP = 4;         // サンプリング間隔
+    const MIN_MOTION_PIXELS = 2;     // 最小変化ピクセル（極限まで緩和）
+    const MAX_MOTION_PIXELS = 900;   // 最大（ストロボ・ブレも許容）
+    const MAX_MOTION_SPREAD = 500;   // 広がり制限（ストロボ・ブレも許容）
 
     function setAppState(state) {
         appState = state;
@@ -333,6 +335,15 @@
 
         if (appState === 1) {
             processMotion();
+            if (lastMotionPos) {
+                ctx.fillStyle = 'rgba(0,255,0,0.7)';
+                ctx.beginPath();
+                ctx.arc(lastMotionPos.x, lastMotionPos.y, 12, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#00ff00';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
         }
 
         requestAnimationFrame(analyzeLoop);
@@ -352,20 +363,45 @@
         }
 
         let sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0, count = 0;
-        // 全画面をスキャン（ボールがどこを通っても検出できるように）
-        for (let y = step; y < h - step; y += step) {
-            for (let x = step; x < w - step; x += step) {
+        const f = getFrameBounds();
+        const margin = Math.min(w, h) * 0.3;
+        const scanLeft = Math.max(step, f.left - margin);
+        const scanRight = Math.min(w - step, f.right + margin);
+        const scanTop = Math.max(step, f.top - margin);
+        const scanBottom = Math.min(h - step, f.bottom + margin);
+
+        for (let y = scanTop; y < scanBottom; y += step) {
+            for (let x = scanLeft; x < scanRight; x += step) {
                 const i = (y * w + x) * 4;
                 const r = Math.abs(data[i] - lastFrameData[i]);
                 const g = Math.abs(data[i+1] - lastFrameData[i+1]);
                 const b = Math.abs(data[i+2] - lastFrameData[i+2]);
-                const diff = (r + g + b) / 3;
-                if (diff > MOTION_THRESHOLD) {
+                const diff = Math.max(r, g, b);
+                if (diff > MOTION_THRESHOLD_FRAME) {
                     sumX += x;
                     sumY += y;
                     sumX2 += x * x;
                     sumY2 += y * y;
                     count++;
+                }
+            }
+        }
+        if (count < MIN_MOTION_PIXELS) {
+            sumX = sumY = sumX2 = sumY2 = count = 0;
+            for (let y = step; y < h - step; y += step) {
+                for (let x = step; x < w - step; x += step) {
+                    const i = (y * w + x) * 4;
+                    const r = Math.abs(data[i] - lastFrameData[i]);
+                    const g = Math.abs(data[i+1] - lastFrameData[i+1]);
+                    const b = Math.abs(data[i+2] - lastFrameData[i+2]);
+                    const diff = Math.max(r, g, b);
+                    if (diff > MOTION_THRESHOLD_GLOBAL) {
+                        sumX += x;
+                        sumY += y;
+                        sumX2 += x * x;
+                        sumY2 += y * y;
+                        count++;
+                    }
                 }
             }
         }
@@ -432,7 +468,10 @@
         const now = performance.now();
 
         if (centroid) {
+            lastMotionPos = { x: centroid.x, y: centroid.y };
             ballTrack.push({ x: centroid.x, y: centroid.y, t: centroid.t });
+        } else {
+            lastMotionPos = null;
         }
 
         // 追跡ポイントが十分あれば解析（途切れた時 or 継続追跡中）
@@ -440,29 +479,20 @@
         const maxTrackAge = 500; // 追跡保持時間を延長
         const recentTrack = ballTrack.filter(p => now - p.t < maxTrackAge);
 
-        // 計測開始直後は無視（カメラの露出調整・初期ノイズ対策）
-        if (now - scanStartTime < 250) return;
+        // 計測開始直後は無視（カメラの露出調整）
+        if (now - scanStartTime < 150) return;
 
         if (!triggeredInThisScan && recentTrack.length >= MIN_FRAMES_FOR_DETECTION) {
             const first = recentTrack[0], last = recentTrack[recentTrack.length - 1];
             const pixelDist = Math.hypot(last.x - first.x, last.y - first.y);
             const timeSec = (last.t - first.t) / 1000;
 
-            // 軌道の直線性チェック（ボールは直線的、手ブレはバラバラ）
+            // 軌道の直線性（緩め：0.35以上でOK）
             const linearity = getTrajectoryLinearity(recentTrack);
-            if (linearity < 0.5) return; // 直線的でない＝手ブレの可能性
+            if (linearity < 0.35) return;
 
-            // フレーム付近通過 または 画面中央付近の明確な軌道なら計測
-            const inFrame = trackPassesThroughFrame(recentTrack);
-            const centerX = canvas.width / 2, centerY = canvas.height / 2;
-            const inCenter = recentTrack.every(p =>
-                Math.abs(p.x - centerX) < canvas.width * 0.45 &&
-                Math.abs(p.y - centerY) < canvas.height * 0.45
-            );
-            if (!inFrame && !(inCenter && linearity > 0.6)) return;
-
-            // 25px以上・0.02秒以上で計測（検出感度を大幅に向上）
-            if (timeSec > 0.02 && pixelDist > 25) {
+            // 10px以上・0.008秒以上で計測（極限まで緩和）
+            if (timeSec > 0.008 && pixelDist > 10) {
                 const totalDist = parseFloat(distInput.value) || 18.44;
                 const visibleFrac = parseFloat(visibleFracSelect.value) || 0.33;
                 const visibleDist = totalDist * visibleFrac;
