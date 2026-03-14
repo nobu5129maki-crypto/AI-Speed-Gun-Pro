@@ -187,7 +187,6 @@
                     <button id="main-btn" class="btn-primary interactive flex-1">計測スタート</button>
                     <button id="stop-btn" class="btn-primary btn-stop interactive hidden flex-1">解析中止</button>
                 </div>
-                <button id="test-measure-btn" class="interactive text-[10px] text-gray-400 hover:text-[#ccff00] py-1">タップでテスト計測（85km/h）</button>
             </div>
         </div>
     </div>
@@ -523,12 +522,6 @@
     };
 
     stopBtn.onclick = () => setAppState(0);
-    document.getElementById('test-measure-btn').onclick = () => {
-        if (appState === 1) {
-            triggeredInThisScan = true;
-            onBallDetected(85);
-        }
-    };
     document.getElementById('reset-max').onclick = () => {
         maxSpeed = 0;
         maxSpeedDisplay.innerText = "---";
