@@ -182,9 +182,12 @@
 
             <div id="status-badge" class="bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20">READY FOR SCAN</div>
             
-            <div class="flex gap-2">
-                <button id="main-btn" class="btn-primary interactive">計測スタート</button>
-                <button id="stop-btn" class="btn-primary btn-stop interactive hidden">解析中止</button>
+            <div class="flex flex-col gap-2 w-full max-w-xs">
+                <div class="flex gap-2">
+                    <button id="main-btn" class="btn-primary interactive flex-1">計測スタート</button>
+                    <button id="stop-btn" class="btn-primary btn-stop interactive hidden flex-1">解析中止</button>
+                </div>
+                <button id="test-measure-btn" class="interactive text-[10px] text-gray-400 hover:text-[#ccff00] py-1">タップでテスト計測（85km/h）</button>
             </div>
         </div>
     </div>
@@ -239,7 +242,10 @@
     let appState = 0; // 0: READY, 1: SCANNING, 2: HOLD
     let maxSpeed = 0;
     let lastFrameData = null;
+    let prevFrameData = null;  // 2フレーム前（動きを増幅）
     let lastFrameTime = 0;
+    let analysisCanvas = null;
+    let analysisCtx = null;
     let ballTrack = [];      // {x, y, t} の配列
     let scanStartTime = 0;
     let triggeredInThisScan = false;
@@ -247,16 +253,15 @@
     const visibleFracSelect = document.getElementById('visible-frac');
     
     // 物理パラメータ（計測可能と精度のバランス）
-    const MIN_REALISTIC_SPEED = 20;   // 20km/h以下はノイズ
-    const MAX_REALISTIC_SPEED = 130;  // 少年野球で130km/h超は誤検知として除外
-    const MAX_YOUTH_SPEED = 115;      // 小学生・中学生の現実的上限
+    const MIN_REALISTIC_SPEED = 15;   // 15km/h以下はノイズ
+    const MAX_REALISTIC_SPEED = 200;  // 上限を拡大（大人の投球も計測可能）
     const MIN_FRAMES_FOR_DETECTION = 2;  // 2フレーム以上で計測（超高速ボールも検出）
-    const MOTION_THRESHOLD_FRAME = 18;   // フレーム内：超低閾値（確実に検出）
-    const MOTION_THRESHOLD_GLOBAL = 22;  // 全体：低閾値
-    const ANALYSIS_STEP = 4;         // サンプリング間隔
+    const MOTION_THRESHOLD_FRAME = 12;   // フレーム内：極低閾値
+    const MOTION_THRESHOLD_GLOBAL = 15;  // 全体：低閾値
+    const ANALYSIS_STEP = 2;         // サンプリング間隔（細かく）
     const MIN_MOTION_PIXELS = 2;     // 最小変化ピクセル（極限まで緩和）
     const MAX_MOTION_PIXELS = 900;   // 最大（ストロボ・ブレも許容）
-    const MAX_MOTION_SPREAD = 500;   // 広がり制限（ストロボ・ブレも許容）
+    const MAX_MOTION_SPREAD = 9999;  // 広がりチェック無効（確実に検出優先）
 
     function setAppState(state) {
         appState = state;
@@ -286,6 +291,8 @@
                 guideText.innerText = "投球を待機しています...";
                 ballTrack = [];
                 lastFrameData = null;
+                prevFrameData = null;
+                prevFrameData = null;
                 triggeredInThisScan = false;
                 scanStartTime = performance.now();
                 break;
@@ -319,6 +326,10 @@
             video.onloadedmetadata = () => {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
+                analysisCanvas = document.createElement('canvas');
+                analysisCanvas.width = 320;
+                analysisCanvas.height = 180;
+                analysisCtx = analysisCanvas.getContext('2d');
                 video.play();
                 requestAnimationFrame(analyzeLoop);
             };
@@ -349,78 +360,49 @@
         requestAnimationFrame(analyzeLoop);
     }
 
-    // フレーム差分でモーション重心を検出（全画面スキャンで見逃し防止）
+    // フレーム差分でモーション重心を検出（低解像度で高速処理）
     function getMotionCentroid() {
-        const w = canvas.width, h = canvas.height;
-        const img = ctx.getImageData(0, 0, w, h);
+        if (!analysisCtx || !video.videoWidth) return null;
+        const aw = 320, ah = 180;
+        analysisCtx.drawImage(video, 0, 0, aw, ah);
+        const img = analysisCtx.getImageData(0, 0, aw, ah);
         const data = img.data;
         const step = ANALYSIS_STEP;
 
         if (!lastFrameData || lastFrameData.length !== data.length) {
             lastFrameData = new Uint8ClampedArray(data);
+            prevFrameData = null;
             lastFrameTime = performance.now();
             return null;
         }
+        const compareData = prevFrameData || lastFrameData;
+        if (!prevFrameData) prevFrameData = new Uint8ClampedArray(data);
 
-        let sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0, count = 0;
-        const f = getFrameBounds();
-        const margin = Math.min(w, h) * 0.3;
-        const scanLeft = Math.max(step, f.left - margin);
-        const scanRight = Math.min(w - step, f.right + margin);
-        const scanTop = Math.max(step, f.top - margin);
-        const scanBottom = Math.min(h - step, f.bottom + margin);
-
-        for (let y = scanTop; y < scanBottom; y += step) {
-            for (let x = scanLeft; x < scanRight; x += step) {
-                const i = (y * w + x) * 4;
-                const r = Math.abs(data[i] - lastFrameData[i]);
-                const g = Math.abs(data[i+1] - lastFrameData[i+1]);
-                const b = Math.abs(data[i+2] - lastFrameData[i+2]);
+        let sumX = 0, sumY = 0, count = 0;
+        for (let y = step; y < ah - step; y += step) {
+            for (let x = step; x < aw - step; x += step) {
+                const i = (y * aw + x) * 4;
+                const r = Math.abs(data[i] - compareData[i]);
+                const g = Math.abs(data[i+1] - compareData[i+1]);
+                const b = Math.abs(data[i+2] - compareData[i+2]);
                 const diff = Math.max(r, g, b);
-                if (diff > MOTION_THRESHOLD_FRAME) {
+                if (diff > MOTION_THRESHOLD_GLOBAL) {
                     sumX += x;
                     sumY += y;
-                    sumX2 += x * x;
-                    sumY2 += y * y;
                     count++;
                 }
             }
         }
-        if (count < MIN_MOTION_PIXELS) {
-            sumX = sumY = sumX2 = sumY2 = count = 0;
-            for (let y = step; y < h - step; y += step) {
-                for (let x = step; x < w - step; x += step) {
-                    const i = (y * w + x) * 4;
-                    const r = Math.abs(data[i] - lastFrameData[i]);
-                    const g = Math.abs(data[i+1] - lastFrameData[i+1]);
-                    const b = Math.abs(data[i+2] - lastFrameData[i+2]);
-                    const diff = Math.max(r, g, b);
-                    if (diff > MOTION_THRESHOLD_GLOBAL) {
-                        sumX += x;
-                        sumY += y;
-                        sumX2 += x * x;
-                        sumY2 += y * y;
-                        count++;
-                    }
-                }
-            }
-        }
+        prevFrameData.set(lastFrameData);
         lastFrameData.set(data);
         const now = performance.now();
-        const dt = now - lastFrameTime;
         lastFrameTime = now;
 
-        // ノイズ排除：少なすぎ＝ノイズ、多すぎ＝画面全体の変化（手ブレ・白壁の揺れ）
         if (count < MIN_MOTION_PIXELS || count > MAX_MOTION_PIXELS) return null;
 
-        // 変化の広がりチェック：ボールは局所に集中、白壁の揺れは画面全体に広がる
-        const meanX = sumX / count, meanY = sumY / count;
-        const spreadX = Math.sqrt(Math.max(0, sumX2 / count - meanX * meanX));
-        const spreadY = Math.sqrt(Math.max(0, sumY2 / count - meanY * meanY));
-        const spread = Math.max(spreadX, spreadY);
-        if (spread > MAX_MOTION_SPREAD) return null;
-
-        return { x: meanX, y: meanY, t: now, dt, count };
+        const scaleX = canvas.width / aw, scaleY = canvas.height / ah;
+        const meanX = (sumX / count) * scaleX, meanY = (sumY / count) * scaleY;
+        return { x: meanX, y: meanY, t: now, dt: 0, count };
     }
 
     // ガイドフレームのキャンバス座標（画面上の枠と一致：幅80%、高さ33%、中央配置）
@@ -480,7 +462,7 @@
         const recentTrack = ballTrack.filter(p => now - p.t < maxTrackAge);
 
         // 計測開始直後は無視（カメラの露出調整）
-        if (now - scanStartTime < 150) return;
+        if (now - scanStartTime < 80) return;
 
         if (!triggeredInThisScan && recentTrack.length >= MIN_FRAMES_FOR_DETECTION) {
             const first = recentTrack[0], last = recentTrack[recentTrack.length - 1];
@@ -507,10 +489,6 @@
                 // 横撮影・アップでない場合の補正（過大評価を抑制、ただし計測不能にしない）
                 if (visibleFrac <= 0.5) speedKmh *= 0.85;
                 if (visibleFrac <= 0.33) speedKmh *= 0.9;
-
-                // 異常値フィルタ（厳格：小学生140km/h等を排除）
-                if (speedKmh < MIN_REALISTIC_SPEED || speedKmh > MAX_REALISTIC_SPEED) return;
-                if (speedKmh > MAX_YOUTH_SPEED) speedKmh = MAX_YOUTH_SPEED * 0.9;
 
                 if (speedKmh >= MIN_REALISTIC_SPEED && speedKmh <= MAX_REALISTIC_SPEED) {
                     triggeredInThisScan = true;
@@ -548,6 +526,12 @@
     };
 
     stopBtn.onclick = () => setAppState(0);
+    document.getElementById('test-measure-btn').onclick = () => {
+        if (appState === 1) {
+            triggeredInThisScan = true;
+            onBallDetected(85);
+        }
+    };
     document.getElementById('reset-max').onclick = () => {
         maxSpeed = 0;
         maxSpeedDisplay.innerText = "---";
