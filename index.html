@@ -254,13 +254,13 @@
     // 物理パラメータ（計測可能と精度のバランス）
     const MIN_REALISTIC_SPEED = 15;   // 15km/h以下はノイズ
     const MAX_REALISTIC_SPEED = 200;  // 上限を拡大（大人の投球も計測可能）
-    const MIN_FRAMES_FOR_DETECTION = 6;  // 6フレーム以上（手ブレは2-3フレームで途切れる）
+    const MIN_FRAMES_FOR_DETECTION = 4;  // 4フレーム以上（速球でも検出可能、手ブレは2-3フレームで途切れる）
     const MOTION_THRESHOLD_FRAME = 20;   // フレーム内閾値
-    const MOTION_THRESHOLD_GLOBAL = 25;  // 全体閾値（微細な手ブレを除外）
-    const ANALYSIS_STEP = 4;         // サンプリング間隔
-    const MIN_MOTION_PIXELS = 12;     // 最小変化ピクセル（ノイズ除外）
-    const MAX_MOTION_PIXELS = 400;    // 最大（画面全体の変化＝手ブレと判断）
-    const MAX_MOTION_SPREAD = 100;    // 変化の広がり（ボールは局所、手ブレは広範囲）
+    const MOTION_THRESHOLD_GLOBAL = 22;  // 全体閾値（やや緩和してボール検出を優先）
+    const ANALYSIS_STEP = 3;         // サンプリング間隔（細かくして検出感度UP）
+    const MIN_MOTION_PIXELS = 8;     // 最小変化ピクセル（ノイズ除外を緩和）
+    const MAX_MOTION_PIXELS = 450;   // 最大（画面全体の変化＝手ブレと判断）
+    const MAX_MOTION_SPREAD = 110;   // 変化の広がり（やや緩和）
 
     function setAppState(state) {
         appState = state;
@@ -414,16 +414,27 @@
     }
 
     // 点がフレーム内（マージン拡張）にあるか
-    function isPointInFrame(x, y) {
+    function isPointInFrame(x, y, marginRatio) {
         const f = getFrameBounds();
-        const margin = Math.min(canvas.width, canvas.height) * 0.2; // 20%マージンで緩和
+        const margin = Math.min(canvas.width, canvas.height) * (marginRatio || 0.35); // 35%マージンで検出範囲を拡大
         return x >= f.left - margin && x <= f.right + margin &&
                y >= f.top - margin && y <= f.bottom + margin;
     }
 
-    // 軌道がフレーム付近を通過しているか（少なくとも1点が拡張フレーム内）
+    // 軌道がフレーム付近を通過しているか（点が枠内 or 軌道の補間点が枠内）
     function trackPassesThroughFrame(points) {
-        return points.some(p => isPointInFrame(p.x, p.y));
+        const margin = 0.35;
+        if (points.some(p => isPointInFrame(p.x, p.y, margin))) return true;
+        // 隣接点間を補間して通過判定（高速ボールでサンプルが飛び飛びでも検出）
+        for (let i = 1; i < points.length; i++) {
+            const p1 = points[i-1], p2 = points[i];
+            for (let k = 1; k <= 5; k++) {
+                const t = k / 5;
+                const x = p1.x + (p2.x - p1.x) * t, y = p1.y + (p2.y - p1.y) * t;
+                if (isPointInFrame(x, y, margin)) return true;
+            }
+        }
+        return false;
     }
 
     // 軌道の直線性を算出（1に近い＝直線的、低い＝ジグザグ・手ブレ）
@@ -465,15 +476,15 @@
             const pixelDist = Math.hypot(last.x - first.x, last.y - first.y);
             const timeSec = (last.t - first.t) / 1000;
 
-            // 軌道の直線性（ボールは直線的、手ブレはジグザグ）- 緩和して枠内通過時の検出を改善
+            // 軌道の直線性（ボールは直線的、手ブレはジグザグ）- 0.5に緩和して検出率UP
             const linearity = getTrajectoryLinearity(recentTrack);
-            if (linearity < 0.6) return;
+            if (linearity < 0.5) return;
 
             // 枠外を通過する物体は計測しない（枠内を通過した場合のみ計測）
             if (!trackPassesThroughFrame(recentTrack)) return;
 
-            // 50px以上・0.04秒以上で計測（手ブレの微細な動きを除外、枠内通過時の検出を改善）
-            if (timeSec > 0.04 && pixelDist > 50) {
+            // 40px以上・0.03秒以上で計測（速球でも検出しやすく）
+            if (timeSec > 0.03 && pixelDist > 40) {
                 const totalDist = parseFloat(distInput.value) || 18.44;
                 const visibleFrac = parseFloat(visibleFracSelect.value) || 0.33;
                 const visibleDist = totalDist * visibleFrac;
