@@ -469,6 +469,9 @@
             const linearity = getTrajectoryLinearity(recentTrack);
             if (linearity < 0.6) return;
 
+            // 枠外を通過する物体は計測しない（枠内を通過した場合のみ計測）
+            if (!trackPassesThroughFrame(recentTrack)) return;
+
             // 50px以上・0.04秒以上で計測（手ブレの微細な動きを除外、枠内通過時の検出を改善）
             if (timeSec > 0.04 && pixelDist > 50) {
                 const totalDist = parseFloat(distInput.value) || 18.44;
