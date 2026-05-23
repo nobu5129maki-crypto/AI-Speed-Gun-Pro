@@ -116,7 +116,7 @@
     <div class="ui-layer">
         <!-- 上部パネル -->
         <div class="flex flex-col gap-2">
-            <div class="flex items-center justify-between px-1">
+            <div class="flex flex-col gap-2 px-1">
                 <div class="flex items-center gap-2">
                     <div class="w-8 h-8 flex-shrink-0 drop-shadow-[0_0_8px_rgba(204,255,0,0.6)]">
                         <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
@@ -131,23 +131,23 @@
                         <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">PRECISION MODE v2.1</p>
                     </div>
                 </div>
-                <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive min-w-[130px] max-w-[220px]">
-                    <div class="flex items-center gap-2 min-h-[36px]">
-                        <span class="text-[10px] text-gray-300 font-black whitespace-nowrap">ピッチャー〜打者の距離</span>
-                        <input type="number" id="dist-input" value="18.44" step="0.01" aria-label="ピッチャーから打者までの距離（メートル）" class="bg-white/10 text-sm font-black w-16 py-1.5 px-2 text-center text-white outline-none rounded border border-white/20 focus:border-[#ccff00] min-h-[32px]">
-                        <span class="text-xs text-gray-400">m</span>
-                    </div>
-                    <div class="flex flex-col gap-1">
-                        <div class="flex items-center gap-2">
-                            <span class="text-[10px] text-gray-300 font-black whitespace-nowrap shrink-0">画面の横幅＝現場では</span>
-                            <select id="visible-frac" title="球速換算に必須。横から撮ると画面上の横幅は現場の一部しか映していないので、百分率で教えます。" class="bg-white/10 text-[11px] font-black text-white outline-none rounded border border-white/20 focus:border-[#ccff00] py-1.5 px-1.5 flex-1 min-h-[34px] cursor-pointer">
-                                <option value="1.0">距離のほぼ全幅（正面・全体）</option>
-                                <option value="0.5">距離の約半分が画面に入る</option>
-                                <option value="0.33" selected>距離の約3分の1（横から・狭く写す）</option>
-                                <option value="0.25">距離の約4分の1より狭い・アップ</option>
-                            </select>
+                <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive w-full min-w-0 box-border">
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-h-[36px]">
+                        <label for="dist-input" class="text-[10px] text-gray-300 font-black">ピッチャー〜打者の距離</label>
+                        <div class="flex items-center gap-1">
+                            <input type="number" id="dist-input" value="18.44" step="0.01" aria-label="ピッチャーから打者までの距離（メートル）" class="bg-white/10 text-sm font-black w-20 py-1.5 px-2 text-center text-white outline-none rounded border border-white/20 focus:border-[#ccff00] min-h-[32px]">
+                            <span class="text-xs text-gray-400">m</span>
                         </div>
-                        <p class="text-[7px] text-gray-500 leading-snug">※球速計算に必要です。画面上の横いっぱいが、上の距離の何割ぶんの幅に当たるかを伝えます。</p>
+                    </div>
+                    <div class="flex flex-col gap-1 w-full min-w-0">
+                        <label for="visible-frac" class="text-[10px] text-gray-300 font-black leading-tight">画面の横幅＝現場では</label>
+                        <select id="visible-frac" title="球速換算に必須。横から撮ると画面上の横幅は現場の一部しか映していないので、百分率で教えます。" class="bg-white/10 text-[11px] font-black text-white outline-none rounded border border-white/20 focus:border-[#ccff00] py-2 px-2 w-full min-w-0 min-h-[40px] cursor-pointer box-border">
+                            <option value="1.0">ほぼ全幅（正面・全体が画面に入る）</option>
+                            <option value="0.5">約半分（画面幅＝距離の約50%）</option>
+                            <option value="0.33" selected>約3分の1（横から・標準）</option>
+                            <option value="0.25">約4分の1（アップ・狭く写す）</option>
+                        </select>
+                        <p class="text-[7px] text-gray-500 leading-snug">※球速計算に必要。画面上の横いっぱいが、距離の何割ぶんの幅かを選びます。</p>
                     </div>
                 </div>
             </div>
