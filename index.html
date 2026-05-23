@@ -92,7 +92,7 @@
             pointer-events: auto;
         }
 
-        /* 距離・表示コントロール：タップしやすく */
+        /* 距離・撮影横幅（visible-frac）コントロール：タップしやすく */
         #dist-input::-webkit-outer-spin-button,
         #dist-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         #dist-input[type=number] { -moz-appearance: textfield; }
@@ -131,20 +131,23 @@
                         <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">PRECISION MODE v2.1</p>
                     </div>
                 </div>
-                <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive min-w-[120px]">
+                <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive min-w-[130px] max-w-[220px]">
                     <div class="flex items-center gap-2 min-h-[36px]">
-                        <span class="text-xs text-gray-400 font-bold uppercase whitespace-nowrap">距離</span>
-                        <input type="number" id="dist-input" value="18.44" step="0.01" class="bg-white/10 text-sm font-black w-16 py-1.5 px-2 text-center text-white outline-none rounded border border-white/20 focus:border-[#ccff00] min-h-[32px]">
+                        <span class="text-[10px] text-gray-300 font-black whitespace-nowrap">ピッチャー〜打者の距離</span>
+                        <input type="number" id="dist-input" value="18.44" step="0.01" aria-label="ピッチャーから打者までの距離（メートル）" class="bg-white/10 text-sm font-black w-16 py-1.5 px-2 text-center text-white outline-none rounded border border-white/20 focus:border-[#ccff00] min-h-[32px]">
                         <span class="text-xs text-gray-400">m</span>
                     </div>
-                    <div class="flex items-center gap-2 min-h-[36px]">
-                        <span class="text-xs text-gray-400 font-bold whitespace-nowrap">表示</span>
-                        <select id="visible-frac" class="bg-white/10 text-sm font-black text-white outline-none rounded border border-white/20 focus:border-[#ccff00] py-1.5 px-2 flex-1 min-h-[32px] cursor-pointer">
-                            <option value="1.0">100%</option>
-                            <option value="0.5">50%</option>
-                            <option value="0.33" selected>33%(横)</option>
-                            <option value="0.25">25%</option>
-                        </select>
+                    <div class="flex flex-col gap-1">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] text-gray-300 font-black whitespace-nowrap shrink-0">画面の横幅＝現場では</span>
+                            <select id="visible-frac" title="球速換算に必須。横から撮ると画面上の横幅は現場の一部しか映していないので、百分率で教えます。" class="bg-white/10 text-[11px] font-black text-white outline-none rounded border border-white/20 focus:border-[#ccff00] py-1.5 px-1.5 flex-1 min-h-[34px] cursor-pointer">
+                                <option value="1.0">距離のほぼ全幅（正面・全体）</option>
+                                <option value="0.5">距離の約半分が画面に入る</option>
+                                <option value="0.33" selected>距離の約3分の1（横から・狭く写す）</option>
+                                <option value="0.25">距離の約4分の1より狭い・アップ</option>
+                            </select>
+                        </div>
+                        <p class="text-[7px] text-gray-500 leading-snug">※球速計算に必要です。画面上の横いっぱいが、上の距離の何割ぶんの幅に当たるかを伝えます。</p>
                     </div>
                 </div>
             </div>
@@ -205,7 +208,7 @@
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">02</span>
-                <span><b>表示範囲:</b> 横から撮影でフレームの1/3程度に写る場合は「33%(横)」を選択。これで過大表示を抑制します。</span>
+                <span><b>画面の横幅＝現場では:</b> 「距離」に対して、画面の横いっぱいがグラウンド上で何割の幅に当たるかです。正面でマウンド〜本塁が画面幅いっぱいなら「ほぼ全幅」。横からボールだけが狭く写るなら「約3分の1」など。ここが合っていないと球速が大きくずれます。</span>
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">03</span>
