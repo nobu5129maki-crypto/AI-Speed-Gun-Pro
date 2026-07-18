@@ -254,16 +254,17 @@
     let lastMotionPos = null; // デバッグ用：検出位置
     const visibleFracSelect = document.getElementById('visible-frac');
     
-    // 物理パラメータ（計測可能と精度のバランス）
+    // 物理パラメータ（小〜中距離のボール通過を優先して検出）
     const MIN_REALISTIC_SPEED = 15;   // 15km/h以下はノイズ
     const MAX_REALISTIC_SPEED = 160;  // 上限を拡大（大人の投球も計測可能）
-    const MIN_FRAMES_FOR_DETECTION = 5;  // 4フレーム以上（速球でも検出可能、手ブレは2-3フレームで途切れる）
-    const MOTION_THRESHOLD_FRAME = 20;   // フレーム内閾値
-    const MOTION_THRESHOLD_GLOBAL = 32;  // 全体閾値（やや緩和してボール検出を優先）
-    const ANALYSIS_STEP = 4;         // サンプリング間隔（細かくして検出感度UP）
-    const MIN_MOTION_PIXELS = 180;     // 最小変化ピクセル（ノイズ除外を緩和）
-    const MAX_MOTION_PIXELS = 450;   // 最大（画面全体の変化＝手ブレと判断）
-    const MAX_MOTION_SPREAD = 110;   // 変化の広がり（やや緩和）
+    const MIN_FRAMES_FOR_DETECTION = 3;  // 速球は3点でも通過判定可能
+    const MOTION_THRESHOLD = 22;     // 輝度差閾値（白球・遠方球を拾う）
+    const ANALYSIS_STEP = 2;         // 枠内を細かくサンプリング
+    const MIN_MOTION_PIXELS = 8;     // 遠方の小さなボールでも検出（従来180は到達不能）
+    const MAX_MOTION_PIXELS = 900;   // 投手腕などが一部入っても許容
+    const MAX_MOTION_SPREAD = 55;    // コンパクトな塊＝ボール、広がり＝手ブレ/背景
+    const TRACK_BRIDGE_MS = 120;     // 1〜2フレーム欠損を補間して軌道を繋ぐ
+    const ROI_MARGIN_RATIO = 0.45;   // 通過判定マージン（枠外すれすれも拾う）
 
     function setAppState(state) {
         appState = state;
@@ -352,58 +353,6 @@
         requestAnimationFrame(analyzeLoop);
     }
 
-    // フレーム差分でモーション重心を検出（低解像度で高速処理）
-    function getMotionCentroid() {
-        if (!analysisCtx || !video.videoWidth) return null;
-        const aw = 320, ah = 180;
-        analysisCtx.drawImage(video, 0, 0, aw, ah);
-        const img = analysisCtx.getImageData(0, 0, aw, ah);
-        const data = img.data;
-        const step = ANALYSIS_STEP;
-
-        if (!lastFrameData || lastFrameData.length !== data.length) {
-            lastFrameData = new Uint8ClampedArray(data);
-            prevFrameData = null;
-            lastFrameTime = performance.now();
-            return null;
-        }
-        const compareData = prevFrameData || lastFrameData;
-        if (!prevFrameData) prevFrameData = new Uint8ClampedArray(data);
-
-        let sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0, count = 0;
-        for (let y = step; y < ah - step; y += step) {
-            for (let x = step; x < aw - step; x += step) {
-                const i = (y * aw + x) * 4;
-                const r = Math.abs(data[i] - compareData[i]);
-                const g = Math.abs(data[i+1] - compareData[i+1]);
-                const b = Math.abs(data[i+2] - compareData[i+2]);
-                const diff = Math.max(r, g, b);
-                if (diff > MOTION_THRESHOLD_GLOBAL) {
-                    sumX += x;
-                    sumY += y;
-                    sumX2 += x * x;
-                    sumY2 += y * y;
-                    count++;
-                }
-            }
-        }
-        prevFrameData.set(lastFrameData);
-        lastFrameData.set(data);
-        const now = performance.now();
-        lastFrameTime = now;
-
-        if (count < MIN_MOTION_PIXELS || count > MAX_MOTION_PIXELS) return null;
-
-        const meanX = sumX / count, meanY = sumY / count;
-        const spreadX = Math.sqrt(Math.max(0, sumX2 / count - meanX * meanX));
-        const spreadY = Math.sqrt(Math.max(0, sumY2 / count - meanY * meanY));
-        const spread = Math.max(spreadX, spreadY);
-        if (spread > MAX_MOTION_SPREAD) return null;
-
-        const scaleX = canvas.width / aw, scaleY = canvas.height / ah;
-        return { x: meanX * scaleX, y: meanY * scaleY, t: now, dt: 0, count };
-    }
-
     // ガイドフレームのキャンバス座標（画面上の枠と一致：幅80%、高さ33%、中央配置）
     function getFrameBounds() {
         const w = canvas.width, h = canvas.height;
@@ -416,28 +365,144 @@
         };
     }
 
+    // 解析解像度上のROI（ガイド枠＋マージン）。背景ノイズを大幅に削減
+    function getAnalysisRoi(aw, ah) {
+        const f = getFrameBounds();
+        const scaleX = aw / canvas.width, scaleY = ah / canvas.height;
+        const marginX = aw * 0.08, marginY = ah * 0.12;
+        return {
+            left: Math.max(0, Math.floor(f.left * scaleX - marginX)),
+            right: Math.min(aw, Math.ceil(f.right * scaleX + marginX)),
+            top: Math.max(0, Math.floor(f.top * scaleY - marginY)),
+            bottom: Math.min(ah, Math.ceil(f.bottom * scaleY + marginY))
+        };
+    }
+
+    // フレーム差分でモーション重心を検出（枠内ROI＋輝度重み付け）
+    function getMotionCentroid() {
+        if (!analysisCtx || !video.videoWidth) return null;
+        const aw = 320, ah = 180;
+        analysisCtx.drawImage(video, 0, 0, aw, ah);
+        const img = analysisCtx.getImageData(0, 0, aw, ah);
+        const data = img.data;
+        const step = ANALYSIS_STEP;
+        const roi = getAnalysisRoi(aw, ah);
+
+        if (!lastFrameData || lastFrameData.length !== data.length) {
+            lastFrameData = new Uint8ClampedArray(data);
+            prevFrameData = null;
+            lastFrameTime = performance.now();
+            return null;
+        }
+        const compareData = prevFrameData || lastFrameData;
+        if (!prevFrameData) prevFrameData = new Uint8ClampedArray(data);
+
+        // 差分の強いピクセルを重み付きで集計（ボールの変化をノイズより優先）
+        let sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0, sumW = 0, count = 0;
+        for (let y = roi.top; y < roi.bottom; y += step) {
+            for (let x = roi.left; x < roi.right; x += step) {
+                const i = (y * aw + x) * 4;
+                const r = Math.abs(data[i] - compareData[i]);
+                const g = Math.abs(data[i + 1] - compareData[i + 1]);
+                const b = Math.abs(data[i + 2] - compareData[i + 2]);
+                // 輝度差も併用（白球が背景に埋もれにくい）
+                const lumDiff = Math.abs(
+                    (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) -
+                    (0.299 * compareData[i] + 0.587 * compareData[i + 1] + 0.114 * compareData[i + 2])
+                );
+                const diff = Math.max(r, g, b, lumDiff);
+                if (diff > MOTION_THRESHOLD) {
+                    const w = diff * diff; // 強い変化を強調
+                    sumX += x * w;
+                    sumY += y * w;
+                    sumX2 += x * x * w;
+                    sumY2 += y * y * w;
+                    sumW += w;
+                    count++;
+                }
+            }
+        }
+        prevFrameData.set(lastFrameData);
+        lastFrameData.set(data);
+        const now = performance.now();
+        lastFrameTime = now;
+
+        if (count < MIN_MOTION_PIXELS || count > MAX_MOTION_PIXELS || sumW <= 0) return null;
+
+        const meanX = sumX / sumW, meanY = sumY / sumW;
+        const spreadX = Math.sqrt(Math.max(0, sumX2 / sumW - meanX * meanX));
+        const spreadY = Math.sqrt(Math.max(0, sumY2 / sumW - meanY * meanY));
+        const spread = Math.max(spreadX, spreadY);
+
+        // サンプル数に応じて許容広がりを調整（小さい塊ほど厳しく）
+        const maxSpread = count < 40 ? MAX_MOTION_SPREAD : MAX_MOTION_SPREAD * 1.35;
+        if (spread > maxSpread) return null;
+
+        const scaleX = canvas.width / aw, scaleY = canvas.height / ah;
+        return { x: meanX * scaleX, y: meanY * scaleY, t: now, dt: 0, count, spread };
+    }
+
     // 点がフレーム内（マージン拡張）にあるか
     function isPointInFrame(x, y, marginRatio) {
         const f = getFrameBounds();
-        const margin = Math.min(canvas.width, canvas.height) * (marginRatio || 0.35); // 35%マージンで検出範囲を拡大
+        const margin = Math.min(canvas.width, canvas.height) * (marginRatio || ROI_MARGIN_RATIO);
         return x >= f.left - margin && x <= f.right + margin &&
                y >= f.top - margin && y <= f.bottom + margin;
     }
 
-    // 軌道がフレーム付近を通過しているか（点が枠内 or 軌道の補間点が枠内）
+    // 軌道がガイド枠を横断／通過しているか
     function trackPassesThroughFrame(points) {
-        const margin = 0.35;
+        const margin = ROI_MARGIN_RATIO;
         if (points.some(p => isPointInFrame(p.x, p.y, margin))) return true;
-        // 隣接点間を補間して通過判定（高速ボールでサンプルが飛び飛びでも検出）
+
+        // 隣接点間を密に補間（高速ボールでサンプルが飛び飛びでも検出）
         for (let i = 1; i < points.length; i++) {
-            const p1 = points[i-1], p2 = points[i];
-            for (let k = 1; k <= 5; k++) {
-                const t = k / 5;
-                const x = p1.x + (p2.x - p1.x) * t, y = p1.y + (p2.y - p1.y) * t;
+            const p1 = points[i - 1], p2 = points[i];
+            const steps = 12;
+            for (let k = 1; k <= steps; k++) {
+                const t = k / steps;
+                const x = p1.x + (p2.x - p1.x) * t;
+                const y = p1.y + (p2.y - p1.y) * t;
                 if (isPointInFrame(x, y, margin)) return true;
             }
         }
+
+        // 左右から枠を横切る通過（点が枠外でも線分が枠を貫く）
+        const f = getFrameBounds();
+        const pad = Math.min(canvas.width, canvas.height) * 0.12;
+        const box = {
+            left: f.left - pad,
+            right: f.right + pad,
+            top: f.top - pad,
+            bottom: f.bottom + pad
+        };
+        for (let i = 1; i < points.length; i++) {
+            if (segmentIntersectsBox(points[i - 1], points[i], box)) return true;
+        }
         return false;
+    }
+
+    function segmentIntersectsBox(p1, p2, box) {
+        // 端点が箱内、または左右境界を横切る
+        const in1 = p1.x >= box.left && p1.x <= box.right && p1.y >= box.top && p1.y <= box.bottom;
+        const in2 = p2.x >= box.left && p2.x <= box.right && p2.y >= box.top && p2.y <= box.bottom;
+        if (in1 || in2) return true;
+        // 水平方向に枠を横断
+        const crossesX =
+            (p1.x < box.left && p2.x > box.right) ||
+            (p2.x < box.left && p1.x > box.right) ||
+            (p1.x < box.left && p2.x >= box.left && p2.x <= box.right) ||
+            (p2.x < box.left && p1.x >= box.left && p1.x <= box.right) ||
+            (p1.x > box.right && p2.x >= box.left && p2.x <= box.right) ||
+            (p2.x > box.right && p1.x >= box.left && p1.x <= box.right);
+        if (!crossesX) return false;
+        const dx = p2.x - p1.x;
+        if (Math.abs(dx) < 1e-6) return false;
+        const midX = (Math.max(box.left, Math.min(p1.x, p2.x)) + Math.min(box.right, Math.max(p1.x, p2.x))) / 2;
+        const t = (midX - p1.x) / dx;
+        if (t < 0 || t > 1) return false;
+        const y = p1.y + (p2.y - p1.y) * t;
+        return y >= box.top && y <= box.bottom;
     }
 
     // 軌道の直線性を算出（1に近い＝直線的、低い＝ジグザグ・手ブレ）
@@ -445,11 +510,11 @@
         if (points.length < 3) return 1;
         let pathLen = 0;
         for (let i = 1; i < points.length; i++) {
-            pathLen += Math.hypot(points[i].x - points[i-1].x, points[i].y - points[i-1].y);
+            pathLen += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
         }
         const directDist = Math.hypot(
-            points[points.length-1].x - points[0].x,
-            points[points.length-1].y - points[0].y
+            points[points.length - 1].x - points[0].x,
+            points[points.length - 1].y - points[0].y
         );
         if (pathLen < 1) return 1;
         return directDist / pathLen;
@@ -462,44 +527,55 @@
         if (centroid) {
             lastMotionPos = { x: centroid.x, y: centroid.y };
             ballTrack.push({ x: centroid.x, y: centroid.y, t: centroid.t });
+        } else if (ballTrack.length >= 2) {
+            // 実検出が途切れた直後だけ速度補間（高速通過でも軌道を繋ぐ）
+            const a = ballTrack[ballTrack.length - 2];
+            const b = ballTrack[ballTrack.length - 1];
+            const gap = now - b.t;
+            if (!b.bridged && gap > 0 && gap <= TRACK_BRIDGE_MS) {
+                const dt = b.t - a.t;
+                if (dt > 0 && dt < 80) {
+                    const vx = (b.x - a.x) / dt;
+                    const vy = (b.y - a.y) / dt;
+                    ballTrack.push({ x: b.x + vx * gap, y: b.y + vy * gap, t: now, bridged: true });
+                }
+            }
+            lastMotionPos = null;
         } else {
             lastMotionPos = null;
         }
 
-        // 追跡ポイントが十分あれば解析（途切れた時 or 継続追跡中）
         const idleFrames = ballTrack.length > 0 && !centroid;
-        const maxTrackAge = 500; // 追跡保持時間を延長
+        const maxTrackAge = 800;
         const recentTrack = ballTrack.filter(p => now - p.t < maxTrackAge);
 
         // 計測開始直後は無視（カメラの露出調整・手ブレ安定化）
-        if (now - scanStartTime < 500) return;
+        if (now - scanStartTime < 300) return;
 
         if (!triggeredInThisScan && recentTrack.length >= MIN_FRAMES_FOR_DETECTION) {
             const first = recentTrack[0], last = recentTrack[recentTrack.length - 1];
             const pixelDist = Math.hypot(last.x - first.x, last.y - first.y);
             const timeSec = (last.t - first.t) / 1000;
 
-            // 軌道の直線性（ボールは直線的、手ブレはジグザグ）- 0.5に緩和して検出率UP
+            // 軌道の直線性（ボールは直線的、手ブレはジグザグ）
             const linearity = getTrajectoryLinearity(recentTrack);
-            if (linearity < 0.5) return;
+            if (linearity < 0.42) return;
 
-            // 枠外を通過する物体は計測しない（枠内を通過した場合のみ計測）
+            // 枠を通過した場合のみ計測
             if (!trackPassesThroughFrame(recentTrack)) return;
 
-            // 40px以上・0.03秒以上で計測（速球でも検出しやすく）
-            if (timeSec > 0.03 && pixelDist > 40) {
+            // 速球でも検出しやすい最小移動量・時間
+            if (timeSec > 0.02 && pixelDist > 28) {
                 const totalDist = parseFloat(distInput.value) || 18.44;
                 const visibleFrac = parseFloat(visibleFracSelect.value) || 0.33;
                 const visibleDist = totalDist * visibleFrac;
 
-                // フレーム幅＝表示範囲の実距離。ピクセル移動割合で実距離を算出
                 const frameWidth = canvas.width;
                 const travelRatio = Math.min(1, pixelDist / frameWidth);
                 const realDist = visibleDist * travelRatio;
 
                 let speedKmh = (realDist / timeSec) * 3.6;
 
-                // 横撮影・アップでない場合の補正（過大評価を抑制、ただし計測不能にしない）
                 if (visibleFrac <= 0.5) speedKmh *= 0.85;
                 if (visibleFrac <= 0.33) speedKmh *= 0.9;
 
@@ -507,14 +583,15 @@
                     triggeredInThisScan = true;
                     ballTrack = [];
                     lastFrameData = null;
+                    prevFrameData = null;
                     onBallDetected(Math.round(speedKmh * 10) / 10);
                 }
             }
         }
 
         if (idleFrames && ballTrack.length > 0) {
-            const elapsed = now - ballTrack[0].t;
-            if (elapsed > 500) ballTrack = [];
+            const elapsed = now - ballTrack[ballTrack.length - 1].t;
+            if (elapsed > 800) ballTrack = [];
         }
     }
 
