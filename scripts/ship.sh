@@ -13,27 +13,27 @@ if [[ -n "$(git status --porcelain)" ]]; then
 fi
 
 push_with_retry() {
-  local target="$1"
+  local args=("$@")
   local delay=4
   local i
   for i in 1 2 3 4; do
-    if git push -u origin "$target"; then
+    if git push "${args[@]}"; then
       return 0
     fi
     echo "push failed (try $i), retry in ${delay}s..." >&2
     sleep "$delay"
     delay=$((delay * 2))
   done
-  echo "push failed after retries: $target" >&2
+  echo "push failed after retries: ${args[*]}" >&2
   return 1
 }
 
 # 作業ブランチ
-push_with_retry "$BRANCH"
+push_with_retry -u origin "$BRANCH"
 
-# 本番（Vercel Production = main）
+# 本番（Vercel Production = main）— upstream は付けない
 if [[ "$BRANCH" != "main" ]]; then
-  push_with_retry "${BRANCH}:main"
+  push_with_retry origin "${BRANCH}:main"
 fi
 
 echo ""
