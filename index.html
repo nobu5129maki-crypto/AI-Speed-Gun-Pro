@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - CROSS CATCH v3.1</title>
+    <title>AIスピードガン プロ - MOTION LOCK v3.2</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -128,7 +128,7 @@
                     </div>
                     <div class="leading-tight">
                         <h1 class="text-[10px] font-black italic text-white uppercase">AI SPEED ANALYZER</h1>
-                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CROSS CATCH v3.1</p>
+                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">MOTION LOCK v3.2</p>
                     </div>
                 </div>
                 <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive w-full min-w-0 box-border">
@@ -224,7 +224,7 @@
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">06</span>
-                <span><b>v3.1 横断キャッチ:</b> 背景差分＋列ピーク追跡で「枠を左右に横切る白球」を最優先で捉えます。緑のロック点が動いたら捕捉中です。暗い／対照的な背景ほど有利です。</span>
+                <span><b>v3.2 モーションロック:</b> カメラ映像の重複判定バグを修正し、指先など暗い物体の横断にも反応します。計測中に画面下のバー／緑点が動くことを確認してから投球してください。</span>
             </li>
         </ul>
         <button id="close-modal" class="w-full mt-6 bg-[#ccff00] text-black font-black py-3 rounded-2xl uppercase text-xs">閉じる</button>
@@ -246,35 +246,36 @@
     const visibleFracSelect = document.getElementById('visible-frac');
     const ctx = canvas.getContext('2d');
 
-    // ---- CROSS CATCH v3.1 -------------------------------------------------
-    // 狙い: 「ガイド枠を横切る白球」を確実に捉える
-    // 手法: 新フレーム同期 + 背景EMA差分 + 列ピーク追跡 + 短い軌道でも確定
-    const AW = 360;
-    const AH = 203;
-    const MIN_SPEED = 10;
-    const MAX_SPEED = 175;
-    const BG_ALPHA = 0.04;          // 背景の追従速度（遅い＝動体を残す）
-    const MOTION_THR = 10;          // フレーム間輝度差
-    const FG_THR = 14;              // 背景差分
-    const BRIGHT_THR = 110;         // 白球候補の輝度
-    const MIN_COL_ENERGY = 80;      // 列ピークとして認める最低エネルギー
-    const WARMUP_MS = 250;
-    const TRACK_MAX_AGE_MS = 700;
-    const BRIDGE_MS = 150;
+    // ---- MOTION LOCK v3.2 -------------------------------------------------
+    // 致命バグ修正:
+    //  1) MediaStream で video.currentTime が 0 のまま → 解析が全スキップ
+    //  2) 粗い fingerprint が指先を見落とし「同一フレーム」誤判定
+    // 方針: 毎フレーム RGB 差分（輝度非依存）+ 列ピークで横切る動きを捕捉。
+    const AW = 320;
+    const AH = 180;
+    const MIN_SPEED = 5;
+    const MAX_SPEED = 180;
+    const MOTION_THR = 8;           // 指先の薄い差分も拾う
+    const MIN_MOTION_PIXELS = 3;
+    const MAX_MOTION_PIXELS = 12000; // 大きめの手も一時的に許容
+    const WARMUP_MS = 200;
+    const TRACK_MAX_AGE_MS = 900;
+    const BRIDGE_MS = 180;
+    const STEP = 1;
 
-    let appState = 0; // 0 READY, 1 SCAN, 2 HOLD
+    let appState = 0;
     let maxSpeed = 0;
     let analysisCanvas = null;
     let analysisCtx = null;
-    let prevLuma = null;            // Float32 前フレーム輝度
-    let bgLuma = null;              // Float32 背景モデル
-    let lastVideoTime = -1;
+    let prevRgba = null;            // Uint8ClampedArray 前フレーム
     let ballTrack = [];
     let scanStartTime = 0;
     let triggeredInThisScan = false;
     let lastMotionPos = null;
     let loopRunning = false;
-    let usingRvfc = false;
+    let motionLevel = 0;            // 0-100 UI用
+    let framesProcessed = 0;
+    let lastUiPulse = 0;
 
     function setAppState(state) {
         appState = state;
@@ -289,7 +290,7 @@
                 statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
                 holdBadge.classList.add('hidden');
                 guideFrame.style.borderColor = 'rgba(204, 255, 0, 0.4)';
-                guideText.innerText = 'ボールの軌道をこの枠内に収めてください';
+                guideText.innerText = '枠の中を指やボールで左右に横切ってください';
                 speedDisplay.innerText = '---';
                 break;
             case 1:
@@ -297,11 +298,11 @@
                 mainBtn.disabled = true;
                 mainBtn.style.opacity = '0.5';
                 stopBtn.classList.remove('hidden');
-                statusBadge.innerText = 'CATCHING WHITE BALL...';
+                statusBadge.innerText = 'MOTION LISTENING...';
                 statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-red-500 border border-red-500/20 animate-pulse';
                 holdBadge.classList.add('hidden');
                 guideFrame.style.borderColor = '#ef4444';
-                guideText.innerText = '枠を横切る白球を待機中...';
+                guideText.innerText = '枠を横切る動きを待機中...';
                 resetScanBuffers();
                 scanStartTime = performance.now();
                 triggeredInThisScan = false;
@@ -312,11 +313,11 @@
                 mainBtn.innerText = '次の計測へ';
                 mainBtn.classList.add('btn-reset');
                 stopBtn.classList.add('hidden');
-                statusBadge.innerText = 'BALL CAUGHT';
+                statusBadge.innerText = 'MOTION CAUGHT';
                 statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-yellow-500 border border-yellow-500/20';
                 holdBadge.classList.remove('hidden');
                 guideFrame.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-                guideText.innerText = '白球を捕捉しました';
+                guideText.innerText = '動きを捕捉しました';
                 break;
         }
     }
@@ -324,9 +325,20 @@
     function resetScanBuffers() {
         ballTrack = [];
         lastMotionPos = null;
-        prevLuma = null;
-        bgLuma = null;
-        lastVideoTime = -1;
+        prevRgba = null;
+        motionLevel = 0;
+        framesProcessed = 0;
+    }
+
+    function syncCanvasSize() {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (!vw || !vh) return false;
+        if (canvas.width !== vw || canvas.height !== vh) {
+            canvas.width = vw;
+            canvas.height = vh;
+        }
+        return true;
     }
 
     async function startCamera() {
@@ -336,30 +348,40 @@
                     facingMode: { ideal: 'environment' },
                     width: { ideal: 1280 },
                     height: { ideal: 720 },
-                    frameRate: { ideal: 60, min: 24 }
+                    frameRate: { ideal: 60, min: 15 }
                 },
                 audio: false
             });
             video.srcObject = stream;
+            video.muted = true;
+            video.setAttribute('playsinline', 'true');
             await video.play();
-            canvas.width = video.videoWidth || 1280;
-            canvas.height = video.videoHeight || 720;
+            // メタデータ待ち
+            if (!video.videoWidth) {
+                await new Promise(resolve => {
+                    video.onloadedmetadata = resolve;
+                    setTimeout(resolve, 1500);
+                });
+            }
+            syncCanvasSize();
             analysisCanvas = document.createElement('canvas');
             analysisCanvas.width = AW;
             analysisCanvas.height = AH;
             analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
             startLoop();
+            statusBadge.innerText = appState === 1 ? 'MOTION LISTENING...' : 'CAMERA ON';
         } catch (e) {
             statusBadge.innerText = 'CAMERA ERROR';
             console.error(e);
+            alert('カメラを起動できませんでした。ブラウザのカメラ許可を確認してください。');
         }
     }
 
     function startLoop() {
         if (loopRunning) return;
         loopRunning = true;
-        usingRvfc = typeof video.requestVideoFrameCallback === 'function';
-        if (usingRvfc) {
+        const useRvfc = typeof video.requestVideoFrameCallback === 'function';
+        if (useRvfc) {
             const onFrame = () => {
                 tick();
                 if (loopRunning) video.requestVideoFrameCallback(onFrame);
@@ -376,28 +398,42 @@
 
     function tick() {
         if (video.readyState < 2) return;
+        if (!syncCanvasSize()) return;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         if (appState === 1) {
             processNewFrame();
-            drawLockMarker();
+            drawOverlays();
         }
     }
 
-    function drawLockMarker() {
+    function drawOverlays() {
+        // モーション強度バー（反応していることを即座に見せる）
+        const barW = canvas.width * 0.5;
+        const barH = Math.max(6, canvas.height * 0.01);
+        const x0 = (canvas.width - barW) / 2;
+        const y0 = canvas.height * 0.72;
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        ctx.fillRect(x0, y0, barW, barH);
+        const fill = Math.min(1, motionLevel / 100);
+        ctx.fillStyle = fill > 0.35 ? '#ccff00' : '#22d3ee';
+        ctx.fillRect(x0, y0, barW * fill, barH);
+        ctx.restore();
+
         if (!lastMotionPos) return;
         const { x, y } = lastMotionPos;
-        const r = Math.max(10, canvas.width * 0.014);
+        const r = Math.max(12, canvas.width * 0.016);
         ctx.save();
         ctx.strokeStyle = '#ccff00';
-        ctx.fillStyle = 'rgba(204,255,0,0.9)';
-        ctx.lineWidth = Math.max(2, canvas.width * 0.003);
+        ctx.fillStyle = 'rgba(204,255,0,0.95)';
+        ctx.lineWidth = Math.max(2, canvas.width * 0.0035);
         ctx.beginPath();
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.stroke();
         ctx.beginPath();
-        ctx.arc(x, y, r * 0.35, 0, Math.PI * 2);
+        ctx.arc(x, y, r * 0.32, 0, Math.PI * 2);
         ctx.fill();
-        const arm = r * 1.6;
+        const arm = r * 1.7;
         ctx.beginPath();
         ctx.moveTo(x - arm, y); ctx.lineTo(x + arm, y);
         ctx.moveTo(x, y - arm); ctx.lineTo(x, y + arm);
@@ -417,160 +453,148 @@
     }
 
     function getAnalysisRoi() {
+        // ガイド枠＋大きめマージン（指が枠端でも拾う）
         const f = getFrameBounds();
         const sx = AW / canvas.width, sy = AH / canvas.height;
-        // 枠の左右外側も広く見る（進入前の白球を先取り）
         return {
-            left: Math.max(0, Math.floor(f.left * sx - AW * 0.08)),
-            right: Math.min(AW, Math.ceil(f.right * sx + AW * 0.08)),
-            top: Math.max(0, Math.floor(f.top * sy - AH * 0.10)),
-            bottom: Math.min(AH, Math.ceil(f.bottom * sy + AH * 0.10))
+            left: Math.max(0, Math.floor(f.left * sx - AW * 0.12)),
+            right: Math.min(AW, Math.ceil(f.right * sx + AW * 0.12)),
+            top: Math.max(0, Math.floor(f.top * sy - AH * 0.14)),
+            bottom: Math.min(AH, Math.ceil(f.bottom * sy + AH * 0.14))
         };
     }
 
-    /**
-     * 1フレーム解析:
-     *  - 同一 video.currentTime はスキップ（重複フレーム対策＝最大の取りこぼし原因）
-     *  - 背景EMA差分 + 前フレーム差分
-     *  - 明るい画素を強調した「列エネルギー」のピーク = 白球の X
-     */
-    function detectWhiteBallPeak() {
-        if (!analysisCtx || !video.videoWidth) return null;
+    /** MediaStream でも安全な重複フレーム判定（currentTime は使わない） */
+    function fingerprintRgba(data) {
+        // 粗いグリッドでサンプル。完全一致なら同一フレーム。
+        let h = 0;
+        const stride = 64 * 4;
+        for (let i = 0; i < data.length; i += stride) {
+            h = (h * 33 + data[i] + data[i + 1] + data[i + 2]) | 0;
+        }
+        return String(h) + ':' + data[0] + ':' + data[(data.length >> 2) * 4] + ':' + data[data.length - 4];
+    }
 
-        // 新フレームだけ処理（rAF 60回でもカメラ30fpsなら半分は同一）
-        const vt = video.currentTime;
-        if (vt === lastVideoTime && prevLuma) return null;
-        lastVideoTime = vt;
+    /**
+     * 汎用モーション重心検出（指・ボール・何でも）
+     * RGB差分の最大値を使い、肌色でも白球でも反応する
+     */
+    function detectMotionPeak() {
+        if (!analysisCtx || !video.videoWidth) return { peak: null, level: 0 };
 
         analysisCtx.drawImage(video, 0, 0, AW, AH);
         const img = analysisCtx.getImageData(0, 0, AW, AH);
-        const rgba = img.data;
-        const n = AW * AH;
-        const luma = new Float32Array(n);
-        for (let p = 0, i = 0; p < n; p++, i += 4) {
-            luma[p] = 0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2];
-        }
+        const data = img.data;
 
-        if (!prevLuma || prevLuma.length !== n) {
-            prevLuma = luma;
-            bgLuma = new Float32Array(luma);
-            return null;
+        // 重複スキップはしない。
+        // （粗い fingerprint は指先を取りこぼし「同一フレーム」誤判定を起こすため廃止）
+        // 同一映像なら差分≈0 で自然に peak=null になる。
+        if (!prevRgba || prevRgba.length !== data.length) {
+            prevRgba = new Uint8ClampedArray(data);
+            return { peak: null, level: 0 };
         }
-        if (!bgLuma || bgLuma.length !== n) bgLuma = new Float32Array(luma);
 
         const roi = getAnalysisRoi();
         const colE = new Float32Array(AW);
         const colY = new Float32Array(AW);
         const colYW = new Float32Array(AW);
-        let hitPixels = 0;
+        let sumX = 0, sumY = 0, sumW = 0, count = 0, energySum = 0;
         let brightHits = 0;
 
-        for (let y = roi.top; y < roi.bottom; y++) {
-            const row = y * AW;
-            for (let x = roi.left; x < roi.right; x++) {
-                const p = row + x;
-                const L = luma[p];
-                const motion = Math.abs(L - prevLuma[p]);
-                const fg = Math.abs(L - bgLuma[p]);
+        for (let y = roi.top; y < roi.bottom; y += STEP) {
+            for (let x = roi.left; x < roi.right; x += STEP) {
+                const i = (y * AW + x) * 4;
+                const dr = Math.abs(data[i] - prevRgba[i]);
+                const dg = Math.abs(data[i + 1] - prevRgba[i + 1]);
+                const db = Math.abs(data[i + 2] - prevRgba[i + 2]);
+                const diff = Math.max(dr, dg, db);
+                if (diff < MOTION_THR) continue;
 
-                // 背景は静かな画素だけゆっくり更新
-                if (motion < 6) {
-                    bgLuma[p] = bgLuma[p] * (1 - BG_ALPHA) + L * BG_ALPHA;
-                }
-
-                const bright = L >= BRIGHT_THR;
-                const rising = (L - prevLuma[p]) > 7; // 白球の進入
-                const signal = Math.max(motion, fg * 0.9);
-
-                // 白っぽい変化を優先して拾う（暗い揺れは抑制）
-                let keep = false;
-                let w = 0;
-                if (bright && signal >= MOTION_THR * 0.55) {
-                    keep = true;
-                    w = signal * (1.2 + (L - BRIGHT_THR) / 80);
-                    brightHits++;
-                } else if ((rising || fg > FG_THR) && L > 85 && signal >= MOTION_THR) {
-                    keep = true;
-                    w = signal * (0.7 + L / 255);
-                } else if (signal >= MOTION_THR * 1.8 && L > 70) {
-                    // ブラーで輝度が落ちた速球の救済
-                    keep = true;
-                    w = signal * 0.55;
-                }
-
-                if (!keep) continue;
+                // 差分の二乗で強い変化を優先（ノイズより実体）
+                const w = diff * diff;
+                sumX += x * w;
+                sumY += y * w;
+                sumW += w;
+                count++;
+                energySum += diff;
                 colE[x] += w;
                 colY[x] += y * w;
                 colYW[x] += w;
-                hitPixels++;
+
+                const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                if (lum > 140) brightHits++;
             }
         }
 
-        prevLuma = luma;
-        const now = performance.now();
+        prevRgba.set(data);
+        framesProcessed++;
 
-        // 列ピーク探索（横切る白球の本命シグナル）
+        // UI用レベル（指を動かした瞬間にバーが跳ねる）
+        const level = Math.max(0, Math.min(100, Math.log10(1 + energySum) * 18));
+
+        if (count < MIN_MOTION_PIXELS || count > MAX_MOTION_PIXELS || sumW <= 0) {
+            return { peak: null, level };
+        }
+
+        // 列ピークで X を安定化（横切る物体向き）
         let peakX = -1, peakE = 0;
         for (let x = roi.left; x < roi.right; x++) {
-            if (colE[x] > peakE) {
-                peakE = colE[x];
-                peakX = x;
+            if (colE[x] > peakE) { peakE = colE[x]; peakX = x; }
+        }
+
+        let meanX = sumX / sumW;
+        let meanY = sumY / sumW;
+        if (peakX >= 0 && peakE > 0) {
+            let pSum = 0, pW = 0, ySum = 0;
+            const lo = Math.max(roi.left, peakX - 14);
+            const hi = Math.min(roi.right - 1, peakX + 14);
+            for (let x = lo; x <= hi; x++) {
+                const e = colE[x];
+                if (e <= 0) continue;
+                pSum += x * e;
+                pW += e;
+                if (colYW[x] > 0) ySum += (colY[x] / colYW[x]) * e;
+            }
+            if (pW > 0) {
+                meanX = 0.35 * meanX + 0.65 * (pSum / pW);
+                meanY = 0.35 * meanY + 0.65 * (ySum / pW);
             }
         }
-        if (peakX < 0 || peakE < MIN_COL_ENERGY || hitPixels < 2) return null;
-
-        // ピーク近傍でサブピクセルっぽく X/Y を平滑
-        let sumX = 0, sumW = 0, sumY = 0;
-        const lo = Math.max(roi.left, peakX - 10);
-        const hi = Math.min(roi.right - 1, peakX + 10);
-        for (let x = lo; x <= hi; x++) {
-            const e = colE[x];
-            if (e <= 0) continue;
-            sumX += x * e;
-            sumW += e;
-            if (colYW[x] > 0) sumY += (colY[x] / colYW[x]) * e;
-        }
-        if (sumW <= 0) return null;
-        const meanX = sumX / sumW;
-        const meanY = sumY / sumW;
-
-        // 縦広がりチェック（列ごとの Y 分散の簡易代理: 近傍の Y 幅）
-        // 手ブレ全面は hitPixels が膨大＆peakE が平坦になりやすい
-        const flatness = peakE / (sumW + 1e-6);
-        if (hitPixels > 2800 && flatness < 0.12) return null;
 
         const scaleX = canvas.width / AW;
         const scaleY = canvas.height / AH;
         return {
-            x: meanX * scaleX,
-            y: meanY * scaleY,
-            t: now,
-            energy: peakE,
-            hits: hitPixels,
-            brightHits,
-            whiteLock: brightHits >= Math.max(1, hitPixels * 0.2)
+            peak: {
+                x: meanX * scaleX,
+                y: meanY * scaleY,
+                t: performance.now(),
+                count,
+                energy: energySum,
+                brightHits,
+                whiteLock: brightHits >= Math.max(2, count * 0.15)
+            },
+            level
         };
     }
 
     function isNearGuide(x, y) {
         const f = getFrameBounds();
-        const mx = canvas.width * 0.12;
-        const my = canvas.height * 0.16;
+        const mx = canvas.width * 0.18;
+        const my = canvas.height * 0.22;
         return x >= f.left - mx && x <= f.right + mx &&
                y >= f.top - my && y <= f.bottom + my;
     }
 
     function segmentHitsGuide(p1, p2) {
         const f = getFrameBounds();
-        const padX = canvas.width * 0.06;
-        const padY = canvas.height * 0.08;
+        const padX = canvas.width * 0.1;
+        const padY = canvas.height * 0.12;
         const box = {
             left: f.left - padX,
             right: f.right + padX,
             top: f.top - padY,
             bottom: f.bottom + padY
         };
-        // Liang-Barsky
         let t0 = 0, t1 = 1;
         const dx = p2.x - p1.x, dy = p2.y - p1.y;
         const clips = [
@@ -622,9 +646,8 @@
         const first = points[0];
         const last = points[points.length - 1];
         const dt = (last.t - first.t) / 1000;
-        if (dt <= 0.008) return null;
+        if (dt <= 0.006) return null;
 
-        // 回帰（点が多いとき）と端点をブレンド
         let vx, vy;
         if (points.length >= 3) {
             const t0 = first.t;
@@ -656,7 +679,7 @@
         const mpp = visibleDist / (canvas.width || 1);
         let kmh = pixelSpeed * mpp * 3.6;
         const endpoint = (pixelDist * mpp / dt) * 3.6;
-        kmh = kmh * 0.75 + endpoint * 0.25;
+        kmh = kmh * 0.7 + endpoint * 0.3;
 
         if (visibleFrac <= 0.25) kmh *= 0.88;
         else if (visibleFrac <= 0.33) kmh *= 0.92;
@@ -672,9 +695,24 @@
         };
     }
 
+    function pulseUiForMotion(peak) {
+        const now = performance.now();
+        if (now - lastUiPulse < 80) return;
+        lastUiPulse = now;
+        if (peak) {
+            guideFrame.style.borderColor = '#ccff00';
+            guideText.innerText = peak.whiteLock
+                ? 'ロック中（明るい物体）…横切るまで追跡'
+                : '動きを捕捉中…枠を左右に横切ってください';
+            statusBadge.innerText = 'TRACKING ' + Math.round(motionLevel) + '%';
+            statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-[#ccff00] border border-[#ccff00]/40';
+        }
+    }
+
     function processNewFrame() {
         const now = performance.now();
-        const peak = detectWhiteBallPeak();
+        const { peak, level } = detectMotionPeak();
+        motionLevel = level;
 
         if (peak) {
             const prev = ballTrack.length ? ballTrack[ballTrack.length - 1] : null;
@@ -682,10 +720,8 @@
             if (prev) {
                 const dt = peak.t - prev.t;
                 const jump = Math.hypot(peak.x - prev.x, peak.y - prev.y);
-                // 速球は大きく飛ぶ。逆行の巨大ジャンプだけ除外
-                if (dt > 0 && jump > Math.max(canvas.width * 0.55, 500)) accept = false;
-                // 同一点の重複は捨てる
-                if (dt < 8 && jump < 2) accept = false;
+                if (dt > 0 && jump > Math.max(canvas.width * 0.65, 600)) accept = false;
+                if (dt < 6 && jump < 1.5) accept = false;
             }
             if (accept) {
                 ballTrack.push({
@@ -696,48 +732,35 @@
                     whiteLock: peak.whiteLock
                 });
                 lastMotionPos = { x: peak.x, y: peak.y };
-                if (peak.whiteLock) {
-                    guideText.innerText = '白球ロック！横切る軌道を記録中';
-                    guideFrame.style.borderColor = '#ccff00';
-                    statusBadge.innerText = 'WHITE BALL LOCKED';
-                    statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-[#ccff00] border border-[#ccff00]/40';
-                } else {
-                    guideText.innerText = '動き検出…白球の横断を待機';
-                }
+                pulseUiForMotion(peak);
             }
         } else if (ballTrack.length >= 2) {
-            // 欠落フレームを短くブリッジ
             const a = ballTrack[ballTrack.length - 2];
             const b = ballTrack[ballTrack.length - 1];
             const gap = now - b.t;
             if (!b.bridged && gap > 0 && gap <= BRIDGE_MS) {
                 const dt = b.t - a.t;
-                if (dt > 0 && dt < 100) {
-                    ballTrack.push({
-                        x: b.x + ((b.x - a.x) / dt) * gap,
-                        y: b.y + ((b.y - a.y) / dt) * gap,
-                        t: now,
-                        bridged: true,
-                        whiteLock: b.whiteLock
-                    });
-                    lastMotionPos = { x: ballTrack[ballTrack.length - 1].x, y: ballTrack[ballTrack.length - 1].y };
+                if (dt > 0 && dt < 120) {
+                    const nx = b.x + ((b.x - a.x) / dt) * gap;
+                    const ny = b.y + ((b.y - a.y) / dt) * gap;
+                    ballTrack.push({ x: nx, y: ny, t: now, bridged: true, whiteLock: b.whiteLock });
+                    lastMotionPos = { x: nx, y: ny };
                 }
             }
         }
 
-        // 古い点を落とす
         ballTrack = ballTrack.filter(p => now - p.t < TRACK_MAX_AGE_MS);
         if (!ballTrack.length) {
             lastMotionPos = null;
-            if (appState === 1 && now - scanStartTime > WARMUP_MS) {
-                guideText.innerText = '枠を横切る白球を待機中...';
+            if (appState === 1 && now - scanStartTime > WARMUP_MS && motionLevel < 8) {
+                guideText.innerText = '枠を横切る動きを待機中...（指でもOK）';
                 guideFrame.style.borderColor = '#ef4444';
+                statusBadge.innerText = 'LISTENING f=' + framesProcessed;
+                statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-red-500 border border-red-500/20 animate-pulse';
             }
         }
 
         if (triggeredInThisScan || now - scanStartTime < WARMUP_MS) return;
-
-        // --- 横断確定（2点でも水平移動が十分なら確定） ---
         tryFinalize(ballTrack);
     }
 
@@ -754,31 +777,16 @@
         const { kmh, pixelDist, dt, dx, dy, horizRatio } = stats;
         const linearity = trackLinearity(points);
         const crosses = trackCrossesGuide(points);
-        const whiteHits = points.filter(p => p.whiteLock).length;
 
-        // 横切る白球の条件（緩めの OR 構造で取りこぼし防止）
-        const horizontalCross =
-            dx >= Math.max(canvas.width * 0.045, 28) &&
-            dx >= dy * 0.45;
-
-        const fastDash =
-            dt < 0.22 &&
-            pixelDist >= Math.max(canvas.width * 0.035, 22) &&
-            horizRatio >= 0.35;
-
-        const solidTrack =
-            points.length >= 3 &&
-            pixelDist >= 18 &&
-            dt >= 0.012 &&
-            linearity >= 0.28;
+        // 指先テストでも確実に通るよう閾値を大幅緩和
+        const minDx = Math.max(canvas.width * 0.03, 18);
+        const horizontalCross = dx >= minDx && dx >= dy * 0.35;
+        const anyDash = pixelDist >= minDx && dt > 0.01 && dt < 1.2 && linearity >= 0.2;
+        const multiPoint = points.length >= 3 && pixelDist >= 14 && linearity >= 0.18;
 
         if (!crosses) return;
-        if (!(horizontalCross || fastDash || solidTrack)) return;
-
-        // 白球ヒットが無いときだけ直線性を厳しめに
-        if (whiteHits === 0 && linearity < 0.4 && points.length >= 3) return;
-        if (horizRatio < 0.18 && dx < dy) return;
-
+        if (!(horizontalCross || anyDash || multiPoint)) return;
+        if (horizRatio < 0.12 && dx < dy * 0.8) return;
         if (kmh < MIN_SPEED || kmh > MAX_SPEED) return;
 
         triggeredInThisScan = true;
@@ -817,20 +825,17 @@
         document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
     };
 
-    // テスト用に主要関数を露出（Node / コンソール検証）
     window.__speedGun = {
-        detectWhiteBallPeak,
+        detectMotionPeak,
         estimateSpeedKmh,
         trackCrossesGuide,
         trackLinearity,
         tryFinalize,
-        get AW() { return AW; },
-        get AH() { return AH; },
+        fingerprintRgba,
+        get framesProcessed() { return framesProcessed; },
+        get motionLevel() { return motionLevel; },
         get ballTrack() { return ballTrack; },
-        setTestCanvas(w, h) {
-            canvas.width = w;
-            canvas.height = h;
-        }
+        setTestCanvas(w, h) { canvas.width = w; canvas.height = h; }
     };
 
 </script>
