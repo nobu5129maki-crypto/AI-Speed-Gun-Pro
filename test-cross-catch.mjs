@@ -1,198 +1,77 @@
-/**
- * BALANCE LOCK v3.4 — 指横断は通す / 重い手ブレは拒否
- */
+const AW=240, AH=135, MOTION_THR=9, BAND_TOP=0.28, BAND_BOT=0.72, MIN_DX_RATIO=0.04;
 
-const AW = 320, AH = 180;
-const MOTION_THR = 10;
-const HEAVY_COVERAGE = 0.28;
-const COMPACT_PEAKINESS = 0.11;
-const MIN_PEAKINESS = 0.08;
-const MAX_SPREAD_Y = 36;
-const MAX_MOTION_PIXELS = 4000;
-
-function makeRgba(fill = [50, 60, 50], draw) {
-  const data = new Uint8ClampedArray(AW * AH * 4);
-  for (let i = 0; i < data.length; i += 4) {
-    data[i] = fill[0]; data[i + 1] = fill[1]; data[i + 2] = fill[2]; data[i + 3] = 255;
-  }
-  if (draw) draw(data);
-  return data;
+function grayFrame(draw){
+  const g=new Uint8Array(AW*AH); g.fill(50); if(draw) draw(g); return g;
 }
-
-function stampDisk(data, cx, cy, r, rgb) {
-  for (let y = Math.floor(cy - r - 1); y <= cy + r + 1; y++) {
-    for (let x = Math.floor(cx - r - 1); x <= cx + r + 1; x++) {
-      if (x < 0 || x >= AW || y < 0 || y >= AH) continue;
-      if ((x - cx) ** 2 + (y - cy) ** 2 <= r * r) {
-        const i = (y * AW + x) * 4;
-        data[i] = rgb[0]; data[i + 1] = rgb[1]; data[i + 2] = rgb[2];
-      }
-    }
+function stamp(g,cx,cy,r,val=220){
+  for(let y=cy-r;y<=cy+r;y++) for(let x=cx-r;x<=cx+r;x++){
+    if(x<0||x>=AW||y<0||y>=AH) continue;
+    if((x-cx)**2+(y-cy)**2<=r*r) g[y*AW+x]=val;
   }
 }
-
-function globalShift(src, dx, dy) {
-  const out = new Uint8ClampedArray(src.length);
-  for (let y = 0; y < AH; y++) {
-    for (let x = 0; x < AW; x++) {
-      const sx = Math.min(AW - 1, Math.max(0, x - dx));
-      const sy = Math.min(AH - 1, Math.max(0, y - dy));
-      const si = (sy * AW + sx) * 4;
-      const di = (y * AW + x) * 4;
-      out[di] = src[si]; out[di + 1] = src[si + 1]; out[di + 2] = src[si + 2]; out[di + 3] = 255;
-    }
+function peak(prev, cur){
+  const y0=Math.floor(AH*BAND_TOP), y1=Math.floor(AH*BAND_BOT);
+  const col=new Float32Array(AW); let mp=0;
+  for(let y=y0;y<y1;y++) for(let x=0;x<AW;x++){
+    const d=Math.abs(cur[y*AW+x]-prev[y*AW+x]);
+    if(d<MOTION_THR) continue; col[x]+=d*d; mp++;
   }
-  return out;
+  if(mp<3) return null;
+  let peakX=-1,peakE=0,total=0;
+  for(let x=2;x<AW-2;x++){ total+=col[x]; if(col[x]>peakE){peakE=col[x];peakX=x;} }
+  if(peakX<0) return null;
+  return {x:peakX, peakiness: peakE/(total+1e-6)};
 }
-
-function analyze(data, prev) {
-  const roi = { left: 20, right: AW - 20, top: 45, bottom: AH - 45 };
-  const roiArea = (roi.right - roi.left) * (roi.bottom - roi.top);
-  let sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0, sumW = 0, count = 0;
-  const colE = new Float32Array(AW);
-  let cornerHits = 0;
-  const corners = [
-    [roi.left + 4, roi.top + 4], [roi.right - 5, roi.top + 4],
-    [roi.left + 4, roi.bottom - 5], [roi.right - 5, roi.bottom - 5]
-  ];
-  for (const [cx, cy] of corners) {
-    let local = 0, n = 0;
-    for (let y = cy; y < cy + 6 && y < roi.bottom; y++) {
-      for (let x = cx; x < cx + 6 && x < roi.right; x++) {
-        const i = (y * AW + x) * 4;
-        const diff = Math.max(
-          Math.abs(data[i] - prev[i]),
-          Math.abs(data[i + 1] - prev[i + 1]),
-          Math.abs(data[i + 2] - prev[i + 2])
-        );
-        if (diff >= MOTION_THR) local++;
-        n++;
-      }
-    }
-    if (n && local / n > 0.25) cornerHits++;
-  }
-  for (let y = roi.top; y < roi.bottom; y++) {
-    for (let x = roi.left; x < roi.right; x++) {
-      const i = (y * AW + x) * 4;
-      const diff = Math.max(
-        Math.abs(data[i] - prev[i]),
-        Math.abs(data[i + 1] - prev[i + 1]),
-        Math.abs(data[i + 2] - prev[i + 2])
-      );
-      if (diff < MOTION_THR) continue;
-      const w = diff * diff;
-      sumX += x * w; sumY += y * w; sumX2 += x * x * w; sumY2 += y * y * w;
-      sumW += w; count++; colE[x] += w;
-    }
-  }
-  if (count < 4 || sumW <= 0) return { shake: false, peak: null };
-  const meanX = sumX / sumW, meanY = sumY / sumW;
-  const spreadY = Math.sqrt(Math.max(0, sumY2 / sumW - meanY * meanY));
-  const coverage = count / roiArea;
-  let peakE = 0, peakX = -1;
-  for (let x = roi.left; x < roi.right; x++) if (colE[x] > peakE) { peakE = colE[x]; peakX = x; }
-  const peakiness = peakE / (sumW + 1e-6);
-  const compactObject = peakiness >= COMPACT_PEAKINESS && spreadY <= MAX_SPREAD_Y && count <= 900;
-  const heavyShake = (coverage > HEAVY_COVERAGE && cornerHits >= 3) || count > MAX_MOTION_PIXELS ||
-    (cornerHits >= 4 && peakiness < MIN_PEAKINESS);
-  const softShake = !compactObject && (
-    (cornerHits >= 3 && peakiness < COMPACT_PEAKINESS) ||
-    (coverage > 0.12 && peakiness < MIN_PEAKINESS) ||
-    (count > 180 && peakiness < 0.07)
-  );
-  if (heavyShake && !compactObject) return { shake: 'heavy', peak: null };
-  if (softShake && !compactObject) return { shake: 'soft', peak: null };
-  return { shake: false, peak: { x: peakX >= 0 ? peakX : meanX, y: meanY, peakiness } };
+function shouldFire(pts, canvasW=1280){
+  if(pts.length<2) return false;
+  const scale=canvasW/AW;
+  const dx=Math.abs(pts.at(-1).x-pts[0].x)*scale;
+  const dy=Math.abs((pts.at(-1).y||0)-(pts[0].y||0))*scale;
+  const need=Math.max(canvasW*MIN_DX_RATIO,24);
+  return dx>=need && dx>=dy*0.5;
 }
+let p=0,f=0; const assert=(n,c,d='')=>{ if(c){p++;console.log('✓',n);} else {f++;console.error('✗',n,d);} };
 
-function shouldFinalize(points, canvasW = 1280) {
-  if (points.length < 2) return false;
-  const scale = canvasW / AW;
-  const dx = Math.abs(points.at(-1).x - points[0].x) * scale;
-  const dy = Math.abs(points.at(-1).y - points[0].y) * scale;
-  const minDx = Math.max(canvasW * 0.05, 28);
-  const dt = (points.at(-1).t - points[0].t) / 1000;
-  const fastSwipe = points.length === 2 && dx >= minDx * 1.2 && dx >= dy && dt < 0.45;
-  if (points.length < 3 && !fastSwipe) return false;
-  return dx >= minDx && dx >= dy * 0.55;
-}
-
-let passed = 0, failed = 0;
-function assert(name, cond, detail = '') {
-  if (cond) { passed++; console.log('✓', name); }
-  else { failed++; console.error('✗', name, detail); }
-}
-
-// heavy global shake
+// fingertip L->R
 {
-  const prev = makeRgba([40, 50, 40], d => {
-    for (let y = 0; y < AH; y += 2) for (let x = 0; x < AW; x += 2) {
-      const i = (y * AW + x) * 4;
-      d[i] = 40 + (x % 23); d[i + 1] = 50 + (y % 19); d[i + 2] = 45;
-    }
-  });
-  const cur = globalShift(prev, 2, 2);
-  const r = analyze(cur, prev);
-  assert('heavy/global shake not a peak', r.peak == null, JSON.stringify(r));
-  assert('shake classified', r.shake === 'heavy' || r.shake === 'soft', JSON.stringify(r));
-}
-
-// fingertip cross
-{
-  const xs = [40, 90, 140, 190, 240, 290];
-  const track = [];
-  let prev = makeRgba();
-  let t = 1000;
-  for (const cx of xs) {
-    const cur = makeRgba([50, 60, 50], d => stampDisk(d, cx, 95, 4, [160, 110, 90]));
-    const r = analyze(cur, prev);
-    prev = cur; t += 33;
-    if (r.peak && !r.shake) track.push({ ...r.peak, t });
+  const xs=[20,50,80,110,140,170,200,220];
+  const track=[]; let prev=grayFrame(); let t=0;
+  for(const cx of xs){
+    const cur=grayFrame(g=>stamp(g,cx,70,4,200));
+    const pk=peak(prev,cur); prev=cur; t+=33;
+    if(pk) track.push({x:pk.x,y:70,t});
   }
-  assert('fingertip peaks kept', track.length >= 3, `n=${track.length}`);
-  assert('fingertip finalized', shouldFinalize(track), `n=${track.length}`);
+  assert('finger peaks', track.length>=4, 'n='+track.length);
+  assert('finger fires', shouldFire(track), 'n='+track.length+' dx='+(track.at(-1).x-track[0].x));
 }
-
-// dark fingertip
+// ball
 {
-  const xs = [50, 110, 170, 230, 290];
-  const track = [];
-  let prev = makeRgba();
-  let t = 1000;
-  for (const cx of xs) {
-    const cur = makeRgba([50, 60, 50], d => stampDisk(d, cx, 92, 3, [90, 70, 55]));
-    const r = analyze(cur, prev);
-    prev = cur; t += 33;
-    if (r.peak) track.push({ ...r.peak, t });
+  const xs=[30,70,110,150,190,220];
+  const track=[]; let prev=grayFrame(); let t=0;
+  for(const cx of xs){
+    const cur=grayFrame(g=>stamp(g,cx,68,5,230));
+    const pk=peak(prev,cur); prev=cur; t+=33;
+    if(pk) track.push({x:pk.x,y:68,t});
   }
-  assert('dark fingertip finalized', shouldFinalize(track), `n=${track.length}`);
+  assert('ball fires', shouldFire(track), 'n='+track.length);
 }
-
-// fast 2-point swipe
+// R->L
 {
-  assert('fast 2-point swipe ok', shouldFinalize([
-    { x: 40, y: 90, t: 1000 },
-    { x: 280, y: 95, t: 1080 }
-  ]));
+  const xs=[220,180,140,100,60,25];
+  const track=[]; let prev=grayFrame(); let t=0;
+  for(const cx of xs){
+    const cur=grayFrame(g=>stamp(g,cx,72,4,180));
+    const pk=peak(prev,cur); prev=cur; t+=33;
+    if(pk) track.push({x:pk.x,y:72,t});
+  }
+  assert('R->L fires', shouldFire(track));
 }
-
-// tiny jitter not finalized
+// 2 point swipe
+assert('2pt swipe', shouldFire([{x:20,y:70,t:0},{x:200,y:72,t:100}]));
+// static
 {
-  const pts = [];
-  for (let i = 0; i < 8; i++) pts.push({ x: 160 + Math.sin(i) * 3, y: 90, t: 1000 + i * 33 });
-  assert('tiny jitter rejected', !shouldFinalize(pts));
+  let prev=grayFrame(); const track=[];
+  for(let i=0;i<6;i++){ const cur=grayFrame(); const pk=peak(prev,cur); prev=cur; if(pk) track.push({x:pk.x,y:70,t:i*33}); }
+  assert('static no fire', !shouldFire(track), 'n='+track.length);
 }
-
-// soft shake must not invent peak
-{
-  // mild shift
-  const prev = makeRgba([50, 55, 50], d => {
-    for (let i = 0; i < d.length; i += 16) { d[i] += (i % 7); }
-  });
-  const cur = globalShift(prev, 1, 0);
-  const r = analyze(cur, prev);
-  assert('soft/global without compact peak', r.peak == null || r.shake, JSON.stringify(r));
-}
-
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed) process.exit(1);
+console.log(`\n${p} passed, ${f} failed`); if(f) process.exit(1);
