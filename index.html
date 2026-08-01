@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - MOTION LOCK v3.2</title>
+    <title>AIスピードガン プロ - STABLE LOCK v3.3</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -128,7 +128,7 @@
                     </div>
                     <div class="leading-tight">
                         <h1 class="text-[10px] font-black italic text-white uppercase">AI SPEED ANALYZER</h1>
-                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">MOTION LOCK v3.2</p>
+                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">STABLE LOCK v3.3</p>
                     </div>
                 </div>
                 <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive w-full min-w-0 box-border">
@@ -224,7 +224,7 @@
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">06</span>
-                <span><b>v3.2 モーションロック:</b> カメラ映像の重複判定バグを修正し、指先など暗い物体の横断にも反応します。計測中に画面下のバー／緑点が動くことを確認してから投球してください。</span>
+                <span><b>v3.3 手ブレ耐性:</b> かすかな手ブレは無視し、枠を左右にしっかり横切る動きだけを計測します。オレンジ表示は手ブレ無視中です。スマホを固定すると安定します。</span>
             </li>
         </ul>
         <button id="close-modal" class="w-full mt-6 bg-[#ccff00] text-black font-black py-3 rounded-2xl uppercase text-xs">閉じる</button>
@@ -246,22 +246,26 @@
     const visibleFracSelect = document.getElementById('visible-frac');
     const ctx = canvas.getContext('2d');
 
-    // ---- MOTION LOCK v3.2 -------------------------------------------------
-    // 致命バグ修正:
-    //  1) MediaStream で video.currentTime が 0 のまま → 解析が全スキップ
-    //  2) 粗い fingerprint が指先を見落とし「同一フレーム」誤判定
-    // 方針: 毎フレーム RGB 差分（輝度非依存）+ 列ピークで横切る動きを捕捉。
+    // ---- STABLE LOCK v3.3 -------------------------------------------------
+    // 手ブレ（画面全体の薄い差分）を捨て、局所的に横切る物体だけ確定する。
     const AW = 320;
     const AH = 180;
-    const MIN_SPEED = 5;
+    const MIN_SPEED = 8;
     const MAX_SPEED = 180;
-    const MOTION_THR = 8;           // 指先の薄い差分も拾う
-    const MIN_MOTION_PIXELS = 3;
-    const MAX_MOTION_PIXELS = 12000; // 大きめの手も一時的に許容
-    const WARMUP_MS = 200;
-    const TRACK_MAX_AGE_MS = 900;
-    const BRIDGE_MS = 180;
+    const MOTION_THR = 12;            // かすかな手ブレを拾いにくく
+    const MIN_MOTION_PIXELS = 6;
+    const MAX_MOTION_PIXELS = 2200;   // 広範囲＝手ブレとして除外
+    const MAX_SPREAD_Y = 28;
+    const MAX_SPREAD_X = 90;
+    const MAX_COVERAGE = 0.18;
+    const MIN_PEAKINESS = 0.10;
+    const WARMUP_MS = 450;
+    const TRACK_MAX_AGE_MS = 750;
+    const BRIDGE_MS = 120;
     const STEP = 1;
+    const MIN_LINEARITY = 0.62;
+    const MIN_DIR_CONSISTENCY = 0.70;
+    const MIN_NET_DX_RATIO = 0.08;
 
     let appState = 0;
     let maxSpeed = 0;
@@ -276,6 +280,8 @@
     let motionLevel = 0;            // 0-100 UI用
     let framesProcessed = 0;
     let lastUiPulse = 0;
+    let shakeStreak = 0;
+    let lastShakeMsg = 0;
 
     function setAppState(state) {
         appState = state;
@@ -290,7 +296,7 @@
                 statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
                 holdBadge.classList.add('hidden');
                 guideFrame.style.borderColor = 'rgba(204, 255, 0, 0.4)';
-                guideText.innerText = '枠の中を指やボールで左右に横切ってください';
+                guideText.innerText = 'スマホを固定し、枠を左右に横切ってください';
                 speedDisplay.innerText = '---';
                 break;
             case 1:
@@ -298,11 +304,11 @@
                 mainBtn.disabled = true;
                 mainBtn.style.opacity = '0.5';
                 stopBtn.classList.remove('hidden');
-                statusBadge.innerText = 'MOTION LISTENING...';
+                statusBadge.innerText = 'STABLE LISTENING...';
                 statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-red-500 border border-red-500/20 animate-pulse';
                 holdBadge.classList.add('hidden');
                 guideFrame.style.borderColor = '#ef4444';
-                guideText.innerText = '枠を横切る動きを待機中...';
+                guideText.innerText = '手ブレ無視中…横断を待機';
                 resetScanBuffers();
                 scanStartTime = performance.now();
                 triggeredInThisScan = false;
@@ -313,11 +319,11 @@
                 mainBtn.innerText = '次の計測へ';
                 mainBtn.classList.add('btn-reset');
                 stopBtn.classList.add('hidden');
-                statusBadge.innerText = 'MOTION CAUGHT';
+                statusBadge.innerText = 'PASS CAPTURED';
                 statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-yellow-500 border border-yellow-500/20';
                 holdBadge.classList.remove('hidden');
                 guideFrame.style.borderColor = 'rgba(255, 255, 255, 0.2)';
-                guideText.innerText = '動きを捕捉しました';
+                guideText.innerText = '横断を計測しました';
                 break;
         }
     }
@@ -328,6 +334,7 @@
         prevRgba = null;
         motionLevel = 0;
         framesProcessed = 0;
+        shakeStreak = 0;
     }
 
     function syncCanvasSize() {
@@ -416,7 +423,7 @@
         ctx.fillStyle = 'rgba(0,0,0,0.45)';
         ctx.fillRect(x0, y0, barW, barH);
         const fill = Math.min(1, motionLevel / 100);
-        ctx.fillStyle = fill > 0.35 ? '#ccff00' : '#22d3ee';
+        ctx.fillStyle = shakeStreak >= 2 ? '#f97316' : (fill > 0.35 ? '#ccff00' : '#22d3ee');
         ctx.fillRect(x0, y0, barW * fill, barH);
         ctx.restore();
 
@@ -479,27 +486,57 @@
      * 汎用モーション重心検出（指・ボール・何でも）
      * RGB差分の最大値を使い、肌色でも白球でも反応する
      */
+    /**
+     * 局所モーション検出 + 手ブレ判定
+     * 広範囲・平坦な差分 → shake / コンパクトな列ピーク → 横断候補
+     */
     function detectMotionPeak() {
-        if (!analysisCtx || !video.videoWidth) return { peak: null, level: 0 };
+        if (!analysisCtx || !video.videoWidth) return { peak: null, level: 0, shake: false };
 
         analysisCtx.drawImage(video, 0, 0, AW, AH);
         const img = analysisCtx.getImageData(0, 0, AW, AH);
         const data = img.data;
 
-        // 重複スキップはしない。
-        // （粗い fingerprint は指先を取りこぼし「同一フレーム」誤判定を起こすため廃止）
-        // 同一映像なら差分≈0 で自然に peak=null になる。
         if (!prevRgba || prevRgba.length !== data.length) {
             prevRgba = new Uint8ClampedArray(data);
-            return { peak: null, level: 0 };
+            return { peak: null, level: 0, shake: false };
         }
 
         const roi = getAnalysisRoi();
+        const roiW = Math.max(1, roi.right - roi.left);
+        const roiH = Math.max(1, roi.bottom - roi.top);
+        const roiArea = (roiW * roiH) / (STEP * STEP);
+
         const colE = new Float32Array(AW);
         const colY = new Float32Array(AW);
         const colYW = new Float32Array(AW);
-        let sumX = 0, sumY = 0, sumW = 0, count = 0, energySum = 0;
-        let brightHits = 0;
+        let sumX = 0, sumY = 0, sumX2 = 0, sumY2 = 0, sumW = 0;
+        let count = 0, energySum = 0, brightHits = 0;
+
+        // 四隅: 全体が同時に動いていれば手ブレ
+        let cornerHits = 0;
+        const corners = [
+            [roi.left + 4, roi.top + 4],
+            [roi.right - 5, roi.top + 4],
+            [roi.left + 4, roi.bottom - 5],
+            [roi.right - 5, roi.bottom - 5]
+        ];
+        for (const [cx, cy] of corners) {
+            let local = 0, n = 0;
+            for (let y = cy; y < cy + 6 && y < roi.bottom; y++) {
+                for (let x = cx; x < cx + 6 && x < roi.right; x++) {
+                    const i = (y * AW + x) * 4;
+                    const diff = Math.max(
+                        Math.abs(data[i] - prevRgba[i]),
+                        Math.abs(data[i + 1] - prevRgba[i + 1]),
+                        Math.abs(data[i + 2] - prevRgba[i + 2])
+                    );
+                    if (diff >= MOTION_THR) local++;
+                    n++;
+                }
+            }
+            if (n > 0 && local / n > 0.25) cornerHits++;
+        }
 
         for (let y = roi.top; y < roi.bottom; y += STEP) {
             for (let x = roi.left; x < roi.right; x += STEP) {
@@ -510,10 +547,11 @@
                 const diff = Math.max(dr, dg, db);
                 if (diff < MOTION_THR) continue;
 
-                // 差分の二乗で強い変化を優先（ノイズより実体）
                 const w = diff * diff;
                 sumX += x * w;
                 sumY += y * w;
+                sumX2 += x * x * w;
+                sumY2 += y * y * w;
                 sumW += w;
                 count++;
                 energySum += diff;
@@ -522,42 +560,57 @@
                 colYW[x] += w;
 
                 const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-                if (lum > 140) brightHits++;
+                if (lum > 145) brightHits++;
             }
         }
 
         prevRgba.set(data);
         framesProcessed++;
 
-        // UI用レベル（指を動かした瞬間にバーが跳ねる）
-        const level = Math.max(0, Math.min(100, Math.log10(1 + energySum) * 18));
-
-        if (count < MIN_MOTION_PIXELS || count > MAX_MOTION_PIXELS || sumW <= 0) {
-            return { peak: null, level };
+        const level = Math.max(0, Math.min(100, Math.log10(1 + energySum) * 16));
+        if (count < MIN_MOTION_PIXELS || sumW <= 0) {
+            return { peak: null, level, shake: false };
         }
 
-        // 列ピークで X を安定化（横切る物体向き）
+        const meanX0 = sumX / sumW;
+        const meanY0 = sumY / sumW;
+        const spreadX = Math.sqrt(Math.max(0, sumX2 / sumW - meanX0 * meanX0));
+        const spreadY = Math.sqrt(Math.max(0, sumY2 / sumW - meanY0 * meanY0));
+        const coverage = count / roiArea;
+
         let peakX = -1, peakE = 0;
         for (let x = roi.left; x < roi.right; x++) {
             if (colE[x] > peakE) { peakE = colE[x]; peakX = x; }
         }
+        const peakiness = peakE / (sumW + 1e-6);
 
-        let meanX = sumX / sumW;
-        let meanY = sumY / sumW;
+        const widespread = coverage > MAX_COVERAGE || count > MAX_MOTION_PIXELS;
+        const flatEnergy = peakiness < MIN_PEAKINESS;
+        const blobTooBig = spreadY > MAX_SPREAD_Y && spreadX > MAX_SPREAD_X * 0.7;
+        const globalShake = cornerHits >= 3;
+        const isShake = widespread || globalShake || (flatEnergy && coverage > 0.06) || blobTooBig;
+
+        if (isShake) {
+            return { peak: null, level, shake: true };
+        }
+        if (spreadY > MAX_SPREAD_Y * 1.15) {
+            return { peak: null, level, shake: true };
+        }
+
+        let meanX = meanX0, meanY = meanY0;
         if (peakX >= 0 && peakE > 0) {
             let pSum = 0, pW = 0, ySum = 0;
-            const lo = Math.max(roi.left, peakX - 14);
-            const hi = Math.min(roi.right - 1, peakX + 14);
+            const lo = Math.max(roi.left, peakX - 12);
+            const hi = Math.min(roi.right - 1, peakX + 12);
             for (let x = lo; x <= hi; x++) {
                 const e = colE[x];
                 if (e <= 0) continue;
-                pSum += x * e;
-                pW += e;
+                pSum += x * e; pW += e;
                 if (colYW[x] > 0) ySum += (colY[x] / colYW[x]) * e;
             }
             if (pW > 0) {
-                meanX = 0.35 * meanX + 0.65 * (pSum / pW);
-                meanY = 0.35 * meanY + 0.65 * (ySum / pW);
+                meanX = 0.3 * meanX + 0.7 * (pSum / pW);
+                meanY = 0.3 * meanY + 0.7 * (ySum / pW);
             }
         }
 
@@ -570,17 +623,22 @@
                 t: performance.now(),
                 count,
                 energy: energySum,
+                spreadX,
+                spreadY,
+                peakiness,
+                coverage,
                 brightHits,
-                whiteLock: brightHits >= Math.max(2, count * 0.15)
+                whiteLock: brightHits >= Math.max(2, count * 0.18)
             },
-            level
+            level,
+            shake: false
         };
     }
 
     function isNearGuide(x, y) {
         const f = getFrameBounds();
-        const mx = canvas.width * 0.18;
-        const my = canvas.height * 0.22;
+        const mx = canvas.width * 0.12;
+        const my = canvas.height * 0.14;
         return x >= f.left - mx && x <= f.right + mx &&
                y >= f.top - my && y <= f.bottom + my;
     }
@@ -641,6 +699,35 @@
         return path < 1 ? 1 : direct / path;
     }
 
+
+    function directionConsistencyX(points) {
+        if (points.length < 3) return 1;
+        const globalDx = points[points.length - 1].x - points[0].x;
+        if (Math.abs(globalDx) < 1) return 0;
+        const sign = Math.sign(globalDx);
+        let agree = 0, total = 0;
+        for (let i = 1; i < points.length; i++) {
+            const dx = points[i].x - points[i - 1].x;
+            if (Math.abs(dx) < 1.2) continue;
+            total++;
+            if (Math.sign(dx) === sign) agree++;
+        }
+        return total === 0 ? 0 : agree / total;
+    }
+
+    function xReversalCount(points) {
+        let rev = 0;
+        let prevSign = 0;
+        for (let i = 1; i < points.length; i++) {
+            const dx = points[i].x - points[i - 1].x;
+            if (Math.abs(dx) < 2) continue;
+            const s = Math.sign(dx);
+            if (prevSign !== 0 && s !== prevSign) rev++;
+            prevSign = s;
+        }
+        return rev;
+    }
+
     function estimateSpeedKmh(points) {
         if (points.length < 2) return null;
         const first = points[0];
@@ -695,24 +782,43 @@
         };
     }
 
+    function showShakeWarning() {
+        const now = performance.now();
+        if (now - lastShakeMsg < 400) return;
+        lastShakeMsg = now;
+        guideText.innerText = '手ブレを無視中…スマホを固定してください';
+        guideFrame.style.borderColor = '#f97316';
+        statusBadge.innerText = 'SHAKE IGNORED';
+        statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-orange-400 border border-orange-400/30';
+    }
+
     function pulseUiForMotion(peak) {
         const now = performance.now();
-        if (now - lastUiPulse < 80) return;
+        if (now - lastUiPulse < 100) return;
         lastUiPulse = now;
-        if (peak) {
-            guideFrame.style.borderColor = '#ccff00';
-            guideText.innerText = peak.whiteLock
-                ? 'ロック中（明るい物体）…横切るまで追跡'
-                : '動きを捕捉中…枠を左右に横切ってください';
-            statusBadge.innerText = 'TRACKING ' + Math.round(motionLevel) + '%';
-            statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-[#ccff00] border border-[#ccff00]/40';
-        }
+        guideFrame.style.borderColor = '#ccff00';
+        guideText.innerText = peak.whiteLock
+            ? '物体ロック中…左右に横切るまで待機'
+            : '局所モーション追跡中…横断を完了させてください';
+        statusBadge.innerText = 'TRACKING';
+        statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-[#ccff00] border border-[#ccff00]/40';
     }
 
     function processNewFrame() {
         const now = performance.now();
-        const { peak, level } = detectMotionPeak();
+        const { peak, level, shake } = detectMotionPeak();
         motionLevel = level;
+
+        if (shake) {
+            shakeStreak++;
+            if (shakeStreak >= 2) {
+                ballTrack = [];
+                lastMotionPos = null;
+                showShakeWarning();
+            }
+            return;
+        }
+        shakeStreak = Math.max(0, shakeStreak - 1);
 
         if (peak) {
             const prev = ballTrack.length ? ballTrack[ballTrack.length - 1] : null;
@@ -720,8 +826,11 @@
             if (prev) {
                 const dt = peak.t - prev.t;
                 const jump = Math.hypot(peak.x - prev.x, peak.y - prev.y);
-                if (dt > 0 && jump > Math.max(canvas.width * 0.65, 600)) accept = false;
-                if (dt < 6 && jump < 1.5) accept = false;
+                const maxJump = Math.max(canvas.width * 0.42, 380);
+                if (dt > 0 && jump > maxJump) accept = false;
+                if (dt < 8 && jump < 2) accept = false;
+                // 微小揺らぎは軌道に足さない（手ブレの点増殖を防ぐ）
+                if (jump < Math.max(4, canvas.width * 0.004) && dt < 50) accept = false;
             }
             if (accept) {
                 ballTrack.push({
@@ -729,6 +838,7 @@
                     y: peak.y,
                     t: peak.t,
                     energy: peak.energy,
+                    peakiness: peak.peakiness,
                     whiteLock: peak.whiteLock
                 });
                 lastMotionPos = { x: peak.x, y: peak.y };
@@ -740,11 +850,18 @@
             const gap = now - b.t;
             if (!b.bridged && gap > 0 && gap <= BRIDGE_MS) {
                 const dt = b.t - a.t;
-                if (dt > 0 && dt < 120) {
-                    const nx = b.x + ((b.x - a.x) / dt) * gap;
-                    const ny = b.y + ((b.y - a.y) / dt) * gap;
-                    ballTrack.push({ x: nx, y: ny, t: now, bridged: true, whiteLock: b.whiteLock });
-                    lastMotionPos = { x: nx, y: ny };
+                if (dt > 0 && dt < 90 && Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) * 0.5) {
+                    ballTrack.push({
+                        x: b.x + ((b.x - a.x) / dt) * gap,
+                        y: b.y + ((b.y - a.y) / dt) * gap,
+                        t: now,
+                        bridged: true,
+                        whiteLock: b.whiteLock
+                    });
+                    lastMotionPos = {
+                        x: ballTrack[ballTrack.length - 1].x,
+                        y: ballTrack[ballTrack.length - 1].y
+                    };
                 }
             }
         }
@@ -752,10 +869,10 @@
         ballTrack = ballTrack.filter(p => now - p.t < TRACK_MAX_AGE_MS);
         if (!ballTrack.length) {
             lastMotionPos = null;
-            if (appState === 1 && now - scanStartTime > WARMUP_MS && motionLevel < 8) {
-                guideText.innerText = '枠を横切る動きを待機中...（指でもOK）';
+            if (appState === 1 && now - scanStartTime > WARMUP_MS && motionLevel < 10 && shakeStreak < 2) {
+                guideText.innerText = '手ブレ無視中…枠を左右にしっかり横切ってください';
                 guideFrame.style.borderColor = '#ef4444';
-                statusBadge.innerText = 'LISTENING f=' + framesProcessed;
+                statusBadge.innerText = 'STABLE LISTENING...';
                 statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-red-500 border border-red-500/20 animate-pulse';
             }
         }
@@ -765,28 +882,38 @@
     }
 
     function tryFinalize(track) {
-        if (track.length < 2) return;
+        if (track.length < 3) return; // 手ブレ2点確定を禁止
 
         const realPoints = track.filter(p => !p.bridged);
-        const points = realPoints.length >= 2 ? realPoints : track;
-        if (points.length < 2) return;
+        const points = realPoints.length >= 3 ? realPoints : track;
+        if (points.length < 3) return;
 
         const stats = estimateSpeedKmh(points);
         if (!stats) return;
 
         const { kmh, pixelDist, dt, dx, dy, horizRatio } = stats;
         const linearity = trackLinearity(points);
+        const dirX = directionConsistencyX(points);
+        const reversals = xReversalCount(points);
         const crosses = trackCrossesGuide(points);
-
-        // 指先テストでも確実に通るよう閾値を大幅緩和
-        const minDx = Math.max(canvas.width * 0.03, 18);
-        const horizontalCross = dx >= minDx && dx >= dy * 0.35;
-        const anyDash = pixelDist >= minDx && dt > 0.01 && dt < 1.2 && linearity >= 0.2;
-        const multiPoint = points.length >= 3 && pixelDist >= 14 && linearity >= 0.18;
+        const minDx = Math.max(canvas.width * MIN_NET_DX_RATIO, 48);
 
         if (!crosses) return;
-        if (!(horizontalCross || anyDash || multiPoint)) return;
-        if (horizRatio < 0.12 && dx < dy * 0.8) return;
+        if (dx < minDx) return;
+        if (dx < dy * 0.85) return;
+        if (linearity < MIN_LINEARITY) return;
+        if (dirX < MIN_DIR_CONSISTENCY) return;
+        if (reversals >= 2) return;
+        if (horizRatio < 0.45) return;
+        if (dt < 0.018 || dt > 0.9) return;
+        if (pixelDist < minDx * 0.9) return;
+
+        const peakVals = points.map(p => p.peakiness).filter(v => typeof v === 'number');
+        if (peakVals.length) {
+            const avgPeak = peakVals.reduce((a, b) => a + b, 0) / peakVals.length;
+            if (avgPeak < 0.08) return;
+        }
+
         if (kmh < MIN_SPEED || kmh > MAX_SPEED) return;
 
         triggeredInThisScan = true;
@@ -830,8 +957,9 @@
         estimateSpeedKmh,
         trackCrossesGuide,
         trackLinearity,
+        directionConsistencyX,
+        xReversalCount,
         tryFinalize,
-        fingerprintRgba,
         get framesProcessed() { return framesProcessed; },
         get motionLevel() { return motionLevel; },
         get ballTrack() { return ballTrack; },
