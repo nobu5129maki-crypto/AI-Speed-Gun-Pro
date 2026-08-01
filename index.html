@@ -468,28 +468,8 @@
     }
 
     function drawHud() {
+        // 枠内のロック点は描画しない（左右端の通過バーのみ）
         const prog = trackProgress(track);
-        // 意味のある横断が始まってからだけロック点を出す（微動では出さない）
-        if (lastPos && prog >= UI_ACTIVATE_DX) {
-            const { x, y } = lastPos;
-            const r = Math.max(9, canvas.width * 0.012);
-            ctx.save();
-            ctx.fillStyle = 'rgba(204,255,0,0.18)';
-            ctx.beginPath();
-            ctx.arc(x, y, r * 1.7, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = 'rgba(204,255,0,0.95)';
-            ctx.beginPath();
-            ctx.arc(x, y, r * 0.36, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = 'rgba(204,255,0,0.8)';
-            ctx.lineWidth = Math.max(2, canvas.width * 0.0028);
-            ctx.beginPath();
-            ctx.arc(x, y, r, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.restore();
-        }
-
         if (guideProgL && guideProgR) {
             if (prog > UI_ACTIVATE_DX) {
                 const op = 0.2 + prog * 0.8;
