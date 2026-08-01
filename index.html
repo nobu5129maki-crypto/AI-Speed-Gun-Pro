@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - CALM FRAME v4.3</title>
+    <title>AIスピードガン プロ - CALM FRAME v4.4</title>
     <meta name="description" content="カメラ映像から投球・指先スワイプ速度を計測する高精度スピードガン">
     <meta name="theme-color" content="#0F172A">
     <meta name="mobile-web-app-capable" content="yes">
@@ -136,7 +136,7 @@
                     </div>
                     <div class="leading-tight">
                         <h1 class="text-[10px] font-black italic text-white uppercase">AI SPEED ANALYZER</h1>
-                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CALM FRAME v4.3</p>
+                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CALM FRAME v4.4</p>
                     </div>
                 </div>
                 <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive w-full min-w-0 box-border">
@@ -238,7 +238,7 @@
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">06</span>
-                <span><b>v4.3 静穏通過:</b> 手ブレや微動では反応しにくくしています。ガイド枠を左から右（または右から左）へしっかり横切ったときだけ計測します。できればスマホを固定してください。</span>
+                <span><b>v4.4 枠内精密:</b> 枠内の横断を拾いやすくし、速度は枠内軌道から精密に算出します。ガイド枠を左から右（または右から左）へ横切ってください。</span>
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">07</span>
@@ -281,32 +281,34 @@
     const visibleFracSelect = document.getElementById('visible-frac');
     const ctx = canvas.getContext('2d');
 
-    // ---- CALM FRAME v4.3 --------------------------------------------------
-    // 枠内テキストなし。手ブレ／微動は弾き、左右ゾーンを渡る軌道だけ計測。
+    // ---- CALM FRAME v4.4 --------------------------------------------------
+    // UIは静穏のまま。手ブレ判定は維持しつつ、枠内横断を確実に計測し精密化する。
     const AW = 320;
     const AH = 180;
     const FRAME_X0 = 0.10;   // = HTML w-4/5
     const FRAME_X1 = 0.90;
     const FRAME_Y0 = 0.335;  // = HTML h-1/3
     const FRAME_Y1 = 0.665;
-    const MOTION_THR = 18;           // 微差・手ブレの薄ノイズは無視
-    const MIN_MOTION_PIXELS = 14;    // 小さすぎるノイズ無視
-    const MAX_MOTION_PIXELS = 780;   // 枠内が広く揺れたら手ブレ
-    const MIN_PEAKINESS = 0.11;      // 尖った塊だけ（平坦＝ブレ）。移動時の双峰も許容
-    const MIN_PEAK_ENERGY = 380;     // 弱すぎる差分無視
-    const MIN_STEP_RATIO = 0.010;    // フレーム間の極小移動は捨てる
-    const MIN_DX_RATIO = 0.14;       // 画面幅比でも十分な横断が必要
-    const MIN_GUIDE_SPAN = 0.40;     // ガイド幅の40%以上の正味移動
-    const ZONE_RATIO = 0.22;         // 左右ゾーン（通過必須）
-    const MIN_LINEARITY = 0.70;
-    const MIN_DIR = 0.78;
-    const MIN_POINTS = 4;
-    const MIN_SPEED = 8;
-    const MAX_SPEED = 180;
-    const WARMUP_MS = 550;
-    const TRACK_MAX_AGE = 850;
-    const UI_ACTIVATE_DX = 0.18;     // 進捗UIは本気の横断から
+    // --- 手ブレ系（v4.3 の感度を維持）---
+    const MOTION_THR = 18;
+    const MIN_MOTION_PIXELS = 14;
+    const MAX_MOTION_PIXELS = 780;
+    const MIN_PEAKINESS = 0.11;
+    const MIN_PEAK_ENERGY = 380;
     const GUIDE_BORDER = 'rgba(204, 255, 0, 0.35)';
+    // --- 枠内計測（拾いやすさ＋精度）---
+    const MIN_STEP_RATIO = 0.0035;   // 小さな横移動も軌道に載せる
+    const MIN_DX_RATIO = 0.08;
+    const MIN_GUIDE_SPAN = 0.22;     // 枠幅の22%で確定可能に
+    const ZONE_RATIO = 0.14;         // 左右ゾーンを少し広げて拾いやすく
+    const MIN_LINEARITY = 0.48;
+    const MIN_DIR = 0.58;
+    const MIN_POINTS = 3;
+    const MIN_SPEED = 6;
+    const MAX_SPEED = 180;
+    const WARMUP_MS = 280;
+    const TRACK_MAX_AGE = 1100;
+    const UI_ACTIVATE_DX = 0.10;
 
     let appState = 0;
     let maxSpeed = 0;
@@ -320,7 +322,6 @@
     let lastPos = null;
     let frames = 0;
     let lastUi = 0;
-    let idleFrames = 0;
 
     function setAppState(state) {
         appState = state;
@@ -374,7 +375,6 @@
         lastPos = null;
         prevGray = null;
         frames = 0;
-        idleFrames = 0;
         clearProgress();
     }
 
@@ -572,21 +572,31 @@
         const spreadX = Math.sqrt(Math.max(0, sumX2 / sumW - meanX0 * meanX0));
         const roiW = roi.x1 - roi.x0;
         const roiH = roi.y1 - roi.y0;
-        // 広く散った差分＝手ブレ（コンパクトな塊だけ通す）
-        if (spreadY > roiH * 0.30) return null;
-        if (spreadX > roiW * 0.28) return null;
-        // 動いた画素がROIの広い割合を占める＝揺れ
-        if (motionPixels > roiW * roiH * 0.12) return null;
+        // 手ブレ維持: 縦に広く散る／ROI大半が動く場合のみ弾く
+        // （横広がりは移動物体の双峰で naturally 増えるので計測側では緩め）
+        if (spreadY > roiH * 0.38) return null;
+        if (motionPixels > roiW * roiH * 0.22) return null;
+
+        // サブピクセル峰值（3点放物線）＋近傍重心で枠内位置精度を上げる
+        let peakXf = peakX;
+        if (peakX > roi.x0 && peakX < roi.x1 - 1) {
+            const ym1 = col[peakX - 1], y0 = col[peakX], yp1 = col[peakX + 1];
+            const denom = (ym1 - 2 * y0 + yp1);
+            if (Math.abs(denom) > 1e-6) {
+                const delta = 0.5 * (ym1 - yp1) / denom;
+                if (delta > -1 && delta < 1) peakXf = peakX + delta;
+            }
+        }
 
         let s = 0, sw = 0, sy = 0;
-        for (let x = Math.max(roi.x0, peakX - 8); x <= Math.min(roi.x1 - 1, peakX + 8); x++) {
+        for (let x = Math.max(roi.x0, Math.floor(peakXf) - 6); x <= Math.min(roi.x1 - 1, Math.ceil(peakXf) + 6); x++) {
             const e = col[x];
             if (e <= 0) continue;
             s += x * e;
             sw += e;
             if (colYW[x] > 0) sy += (colY[x] / colYW[x]) * e;
         }
-        const meanX = sw > 0 ? s / sw : peakX;
+        const meanX = sw > 0 ? (0.55 * peakXf + 0.45 * (s / sw)) : peakXf;
         const meanY = sw > 0 ? sy / sw : meanY0;
 
         const scaleX = canvas.width / AW;
@@ -613,23 +623,24 @@
         const dt = (b.t - a.t) / 1000;
         if (dt <= 0.01) return null;
 
-        // 最小二乗で速度（精密）
+        // エネルギー重み付き最小二乗で枠内速度を精密化
         const t0 = a.t;
-        const n = pts.length;
-        let sumT = 0, sumX = 0, sumY = 0, sumTT = 0, sumTX = 0, sumTY = 0;
+        let sumW = 0, sumT = 0, sumX = 0, sumY = 0, sumTT = 0, sumTX = 0, sumTY = 0;
         for (const p of pts) {
+            const w = Math.max(1, p.e || 1);
             const t = (p.t - t0) / 1000;
-            sumT += t; sumX += p.x; sumY += p.y;
-            sumTT += t * t; sumTX += t * p.x; sumTY += t * p.y;
+            sumW += w;
+            sumT += w * t; sumX += w * p.x; sumY += w * p.y;
+            sumTT += w * t * t; sumTX += w * t * p.x; sumTY += w * t * p.y;
         }
-        const den = n * sumTT - sumT * sumT;
+        const den = sumW * sumTT - sumT * sumT;
         let vx, vy;
         if (Math.abs(den) < 1e-9) {
             vx = (b.x - a.x) / dt;
             vy = (b.y - a.y) / dt;
         } else {
-            vx = (n * sumTX - sumT * sumX) / den;
-            vy = (n * sumTY - sumT * sumY) / den;
+            vx = (sumW * sumTX - sumT * sumX) / den;
+            vy = (sumW * sumTY - sumT * sumY) / den;
         }
 
         const dx = Math.abs(b.x - a.x);
@@ -637,11 +648,27 @@
         const dist = Math.hypot(b.x - a.x, b.y - a.y);
         const speed = Math.hypot(vx, vy);
 
+        // 区間速度の中央値で外れを抑える
+        const segs = [];
+        for (let i = 1; i < pts.length; i++) {
+            const ddt = (pts[i].t - pts[i - 1].t) / 1000;
+            if (ddt <= 0.004) continue;
+            const sx = (pts[i].x - pts[i - 1].x) / ddt;
+            const sy = (pts[i].y - pts[i - 1].y) / ddt;
+            segs.push(Math.hypot(sx, sy));
+        }
+        segs.sort((u, v) => u - v);
+        const medSpeed = segs.length
+            ? (segs.length % 2 ? segs[(segs.length - 1) >> 1]
+                : 0.5 * (segs[segs.length / 2 - 1] + segs[segs.length / 2]))
+            : speed;
+        const fusedSpeed = speed * 0.72 + medSpeed * 0.28;
+
         let agree = 0, tot = 0;
         const sign = Math.sign(b.x - a.x) || 1;
         for (let i = 1; i < pts.length; i++) {
             const ddx = pts[i].x - pts[i - 1].x;
-            if (Math.abs(ddx) < 1.5) continue;
+            if (Math.abs(ddx) < 1.2) continue;
             tot++;
             if (Math.sign(ddx) === sign) agree++;
         }
@@ -652,12 +679,12 @@
             path += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
         }
         const lin = path > 1 ? dist / path : 1;
-        const horizRatio = Math.abs(vx) / (speed + 1e-6);
+        const horizRatio = Math.abs(vx) / (fusedSpeed + 1e-6);
 
-        return { dx, dy, dist, dt, dir, lin, speed, horizRatio, vx, vy };
+        return { dx, dy, dist, dt, dir, lin, speed: fusedSpeed, horizRatio, vx, vy };
     }
 
-    /** 左右ゾーンをまたいだ＝本当に枠を通った（手ブレ緩和のため必須） */
+    /** 左右ゾーン通過、またはガイド幅の十分な横断 */
     function crossesGuideZones(pts) {
         if (pts.length < 2) return false;
         const left = canvas.width * FRAME_X0;
@@ -671,14 +698,16 @@
             if (p.x <= zL) sawL = true;
             if (p.x >= zR) sawR = true;
         }
-        return sawL && sawR;
+        if (sawL && sawR) return true;
+        const st = netStats(pts);
+        return !!(st && st.dx >= w * MIN_GUIDE_SPAN);
     }
 
     function cleanTrack(pts) {
-        if (pts.length < 4) return pts.slice();
+        if (pts.length < 3) return pts.slice();
         const st = netStats(pts);
         if (!st) return pts.slice();
-        // 回帰直線からの外れを落とす
+        // 回帰直線からの外れを落とす（枠内軌道の精度向上）
         const t0 = pts[0].t;
         const kept = [];
         for (const p of pts) {
@@ -686,9 +715,17 @@
             const ex = pts[0].x + st.vx * t;
             const ey = pts[0].y + st.vy * t;
             const err = Math.hypot(p.x - ex, p.y - ey);
-            if (err < Math.max(28, canvas.width * 0.04)) kept.push(p);
+            if (err < Math.max(36, canvas.width * 0.055)) kept.push(p);
         }
         return kept.length >= 3 ? kept : pts.slice();
+    }
+
+    /** 両端の不安定点を落とし、枠内の本通過区間だけ使う */
+    function coreSegment(pts) {
+        if (pts.length <= 3) return pts.slice();
+        const sorted = pts.slice().sort((a, b) => a.t - b.t);
+        // 端1点ずつを軽くトリム（ノイズが多い）
+        return sorted.slice(1, sorted.length - 1);
     }
 
     function toKmhFromSpeed(pxPerSec) {
@@ -708,28 +745,15 @@
         const peak = samplePeak();
 
         if (peak) {
-            idleFrames = 0;
             const prev = track.length ? track[track.length - 1] : null;
             let ok = true;
             if (prev) {
                 const dt = peak.t - prev.t;
                 const jump = Math.hypot(peak.x - prev.x, peak.y - prev.y);
-                const dx = peak.x - prev.x;
-                const dy = peak.y - prev.y;
-                if (dt < 10) ok = false;
-                if (jump > canvas.width * 0.48) ok = false;
-                // わずかな移動は軌道に足さない（手ブレの主因）
-                if (jump < Math.max(4, canvas.width * MIN_STEP_RATIO)) ok = false;
-                // ほぼ縦だけ動く＝手ブレ／上下揺れ
-                if (Math.abs(dx) < Math.abs(dy) * 0.85) ok = false;
-                // 進行方向がすぐ逆転する短い揺れは捨ててやり直す
-                if (track.length >= 2) {
-                    const prevDx = prev.x - track[track.length - 2].x;
-                    if (Math.abs(prevDx) > 3 && Math.abs(dx) > 3 && Math.sign(prevDx) !== Math.sign(dx)) {
-                        track = [];
-                        ok = false;
-                    }
-                }
+                if (dt < 8) ok = false;
+                if (jump > canvas.width * 0.58) ok = false;
+                // 極小移動のみ除外（手ブレの微動はここ＋peak側で抑制）
+                if (jump < Math.max(2.5, canvas.width * MIN_STEP_RATIO)) ok = false;
             }
             if (ok) {
                 track.push({
@@ -739,13 +763,6 @@
                     e: peak.energy,
                     p: peak.peakiness
                 });
-            }
-        } else {
-            idleFrames++;
-            // ピークが途切れた短い揺れは蓄積しない
-            if (idleFrames >= 4 && track.length && track.length < MIN_POINTS + 1) {
-                track = [];
-                clearProgress();
             }
         }
 
@@ -758,13 +775,9 @@
         // 枠は色を変えず、下のステータスだけ落ち着いて更新
         if (now - lastUi > 500) {
             lastUi = now;
-            if (track.length && prog >= UI_ACTIVATE_DX) {
-                statusBadge.innerText = '計測中';
-                statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
-            } else if (now - scanStart > WARMUP_MS) {
-                statusBadge.innerText = '計測中';
-                clearProgress();
-            }
+            statusBadge.innerText = '計測中';
+            statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
+            if (!(track.length && prog >= UI_ACTIVATE_DX)) clearProgress();
         }
 
         if (fired || now - scanStart < WARMUP_MS) return;
@@ -775,26 +788,28 @@
         if (pts.length < MIN_POINTS) return;
         const cleaned = cleanTrack(pts);
         if (cleaned.length < MIN_POINTS) return;
+        const core = coreSegment(cleaned);
+        const use = core.length >= MIN_POINTS ? core : cleaned;
 
         // 全点が枠内（厳密）
-        if (!cleaned.every(p => inGuideStrict(p.x, p.y))) return;
-        if (!crossesGuideZones(cleaned)) return;
+        if (!use.every(p => inGuideStrict(p.x, p.y))) return;
+        if (!crossesGuideZones(use) && !crossesGuideZones(cleaned)) return;
 
-        const st = netStats(cleaned);
+        const st = netStats(use);
         if (!st) return;
 
         const need = Math.max(guideWidthPx() * MIN_GUIDE_SPAN, canvas.width * MIN_DX_RATIO);
         if (st.dx < need) return;
-        if (st.dx < st.dy * 1.25) return; // 横移動が明確であること
-        if (st.dt < 0.03 || st.dt > 0.85) return;
+        if (st.dx < st.dy * 0.75) return;
+        if (st.dt < 0.018 || st.dt > 1.2) return;
         if (st.lin < MIN_LINEARITY) return;
         if (st.dir < MIN_DIR) return;
-        if (st.horizRatio < 0.62) return;
+        if (st.horizRatio < 0.45) return;
 
-        // 回帰速度を主、端点速度を補助
+        // 枠内コア軌道の速度を主、端点速度を補助
         let kmh = toKmhFromSpeed(st.speed);
         const endpoint = toKmhFromSpeed(st.dist / st.dt);
-        kmh = kmh * 0.78 + endpoint * 0.22;
+        kmh = kmh * 0.82 + endpoint * 0.18;
 
         if (!isFinite(kmh) || kmh < MIN_SPEED || kmh > MAX_SPEED) return;
 

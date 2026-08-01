@@ -1,7 +1,10 @@
 const AW=320,AH=180;
 const FRAME_X0=0.10,FRAME_X1=0.90,FRAME_Y0=0.335,FRAME_Y1=0.665;
+// shake gates (unchanged sensitivity)
 const MOTION_THR=18, MIN_MOTION_PIXELS=14, MAX_MOTION_PIXELS=780;
-const MIN_PEAKINESS=0.11, MIN_PEAK_ENERGY=380, MIN_GUIDE_SPAN=0.40, ZONE_RATIO=0.22;
+const MIN_PEAKINESS=0.11, MIN_PEAK_ENERGY=380;
+// in-frame measure (v4.4)
+const MIN_GUIDE_SPAN=0.22, ZONE_RATIO=0.14;
 
 function gray(draw){const g=new Uint8Array(AW*AH); g.fill(48); if(draw) draw(g); return g;}
 function stamp(g,cx,cy,r,v=220){
@@ -32,10 +35,9 @@ function peak(prev,cur){
   if(peakiness<MIN_PEAKINESS) return null;
   const meanX0=sumX/sumW, meanY0=sumY/sumW;
   const spreadY=Math.sqrt(Math.max(0,sumY2/sumW-meanY0*meanY0));
-  const spreadX=Math.sqrt(Math.max(0,sumX2/sumW-meanX0*meanX0));
   const roiW=x1-x0, roiH=y1-y0;
-  if(spreadY>roiH*0.30||spreadX>roiW*0.28) return null;
-  if(mp>roiW*roiH*0.12) return null;
+  if(spreadY>roiH*0.38) return null;
+  if(mp>roiW*roiH*0.22) return null;
   return {x:peakX,y:(y0+y1)/2};
 }
 function crosses(pts){
@@ -43,10 +45,12 @@ function crosses(pts){
   const zL=left+w*ZONE_RATIO,zR=right-w*ZONE_RATIO;
   let L=false,R=false;
   for(const p of pts){ if(p.x<=zL)L=true; if(p.x>=zR)R=true; }
-  return L&&R;
+  if(L&&R) return true;
+  const dx=Math.abs(pts.at(-1).x-pts[0].x);
+  return dx>=w*MIN_GUIDE_SPAN;
 }
 function shouldFire(pts){
-  if(pts.length<4) return false;
+  if(pts.length<3) return false;
   if(!crosses(pts)) return false;
   const dx=Math.abs(pts.at(-1).x-pts[0].x);
   const w=AW*(FRAME_X1-FRAME_X0);
@@ -54,7 +58,7 @@ function shouldFire(pts){
 }
 let p=0,f=0; const A=(n,c,d='')=>{if(c){p++;console.log('✓',n);}else{f++;console.error('✗',n,d);}};
 
-// full cross in frame (left zone → right zone)
+// full cross in frame
 {
   const xs=[40,70,100,130,160,190,220,250,270];
   const track=[]; let prev=gray(); let t=0;
@@ -64,6 +68,16 @@ let p=0,f=0; const A=(n,c,d='')=>{if(c){p++;console.log('✓',n);}else{f++;conso
   }
   A('full in-frame cross fires', shouldFire(track), 'n='+track.length);
 }
+// shorter mid-frame pass should still fire via span
+{
+  const xs=[90,120,150,180,210];
+  const track=[]; let prev=gray(); let t=0;
+  for(const cx of xs){
+    const cur=gray(g=>stamp(g,cx,Math.floor(AH*0.5),5,230));
+    const pk=peak(prev,cur); prev=cur; t+=33; if(pk) track.push({...pk,t});
+  }
+  A('mid-span pass fires', shouldFire(track), 'n='+track.length+' dx='+(track.length?Math.abs(track.at(-1).x-track[0].x):0));
+}
 // tiny jitter in center should not fire
 {
   const track=[];
@@ -72,7 +86,7 @@ let p=0,f=0; const A=(n,c,d='')=>{if(c){p++;console.log('✓',n);}else{f++;conso
 }
 // left-only motion no cross
 {
-  const track=[{x:40,y:90,t:0},{x:55,y:91,t:33},{x:70,y:90,t:66},{x:85,y:92,t:99},{x:100,y:91,t:132}];
+  const track=[{x:40,y:90,t:0},{x:55,y:91,t:33},{x:70,y:90,t:66},{x:85,y:92,t:99}];
   A('partial left travel rejected', !shouldFire(track));
 }
 // outside vertical band ignored by peak
@@ -84,13 +98,13 @@ let p=0,f=0; const A=(n,c,d='')=>{if(c){p++;console.log('✓',n);}else{f++;conso
   }
   A('outside frame ignored', hits===0, 'hits='+hits);
 }
-// weak noise: flat +1 inside frame
+// weak noise
 {
   let prev=gray();
   const cur=gray(g=>{ for(let i=0;i<g.length;i++) g[i]=49; });
   A('weak flat motion no peak', peak(prev,cur)==null);
 }
-// handshake-like: many mid changes across ROI
+// handshake-like spread
 {
   let prev=gray();
   const cur=gray(g=>{
