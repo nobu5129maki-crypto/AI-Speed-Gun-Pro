@@ -1,7 +1,7 @@
 const AW=320,AH=180;
 const FRAME_X0=0.10,FRAME_X1=0.90,FRAME_Y0=0.335,FRAME_Y1=0.665;
-const MOTION_THR=12, MIN_MOTION_PIXELS=10, MAX_MOTION_PIXELS=1400;
-const MIN_PEAKINESS=0.08, MIN_PEAK_ENERGY=250, MIN_GUIDE_SPAN=0.28, ZONE_RATIO=0.18;
+const MOTION_THR=18, MIN_MOTION_PIXELS=14, MAX_MOTION_PIXELS=780;
+const MIN_PEAKINESS=0.11, MIN_PEAK_ENERGY=380, MIN_GUIDE_SPAN=0.40, ZONE_RATIO=0.22;
 
 function gray(draw){const g=new Uint8Array(AW*AH); g.fill(48); if(draw) draw(g); return g;}
 function stamp(g,cx,cy,r,v=220){
@@ -14,19 +14,28 @@ function peak(prev,cur){
   const x0=Math.floor(AW*FRAME_X0),x1=Math.ceil(AW*FRAME_X1);
   const y0=Math.floor(AH*FRAME_Y0),y1=Math.ceil(AH*FRAME_Y1);
   const col=new Float32Array(AW); let mp=0,total=0;
+  let sumX=0,sumY=0,sumX2=0,sumY2=0,sumW=0;
   for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
     const now=cur[y*AW+x], pr=prev[y*AW+x];
     const d=Math.abs(now-pr);
     if(d<MOTION_THR) continue;
     const rising=now>pr; const bright=now>110;
     const boost=(rising?1.6:0.35)*(bright?1.25:1);
-    col[x]+=d*d*boost; mp++;
+    const w=d*d*boost;
+    col[x]+=w; mp++;
+    sumX+=x*w; sumY+=y*w; sumX2+=x*x*w; sumY2+=y*y*w; sumW+=w;
   }
-  if(mp<MIN_MOTION_PIXELS||mp>MAX_MOTION_PIXELS) return null;
+  if(mp<MIN_MOTION_PIXELS||mp>MAX_MOTION_PIXELS||sumW<=0) return null;
   let peakX=-1,peakE=0; for(let x=x0;x<x1;x++){ total+=col[x]; if(col[x]>peakE){peakE=col[x];peakX=x;} }
   if(peakE<MIN_PEAK_ENERGY) return null;
   const peakiness=peakE/(total+1e-6);
   if(peakiness<MIN_PEAKINESS) return null;
+  const meanX0=sumX/sumW, meanY0=sumY/sumW;
+  const spreadY=Math.sqrt(Math.max(0,sumY2/sumW-meanY0*meanY0));
+  const spreadX=Math.sqrt(Math.max(0,sumX2/sumW-meanX0*meanX0));
+  const roiW=x1-x0, roiH=y1-y0;
+  if(spreadY>roiH*0.30||spreadX>roiW*0.28) return null;
+  if(mp>roiW*roiH*0.12) return null;
   return {x:peakX,y:(y0+y1)/2};
 }
 function crosses(pts){
@@ -34,12 +43,10 @@ function crosses(pts){
   const zL=left+w*ZONE_RATIO,zR=right-w*ZONE_RATIO;
   let L=false,R=false;
   for(const p of pts){ if(p.x<=zL)L=true; if(p.x>=zR)R=true; }
-  if(L&&R) return true;
-  const dx=Math.abs(pts.at(-1).x-pts[0].x);
-  return dx>=w*MIN_GUIDE_SPAN;
+  return L&&R;
 }
 function shouldFire(pts){
-  if(pts.length<3) return false;
+  if(pts.length<4) return false;
   if(!crosses(pts)) return false;
   const dx=Math.abs(pts.at(-1).x-pts[0].x);
   const w=AW*(FRAME_X1-FRAME_X0);
@@ -47,9 +54,9 @@ function shouldFire(pts){
 }
 let p=0,f=0; const A=(n,c,d='')=>{if(c){p++;console.log('✓',n);}else{f++;console.error('✗',n,d);}};
 
-// full cross in frame
+// full cross in frame (left zone → right zone)
 {
-  const xs=[40,70,100,130,160,190,220,250];
+  const xs=[40,70,100,130,160,190,220,250,270];
   const track=[]; let prev=gray(); let t=0;
   for(const cx of xs){
     const cur=gray(g=>stamp(g,cx,Math.floor(AH*0.5),5,230));
@@ -65,7 +72,7 @@ let p=0,f=0; const A=(n,c,d='')=>{if(c){p++;console.log('✓',n);}else{f++;conso
 }
 // left-only motion no cross
 {
-  const track=[{x:40,y:90,t:0},{x:55,y:91,t:33},{x:70,y:90,t:66},{x:85,y:92,t:99}];
+  const track=[{x:40,y:90,t:0},{x:55,y:91,t:33},{x:70,y:90,t:66},{x:85,y:92,t:99},{x:100,y:91,t:132}];
   A('partial left travel rejected', !shouldFire(track));
 }
 // outside vertical band ignored by peak
@@ -77,11 +84,21 @@ let p=0,f=0; const A=(n,c,d='')=>{if(c){p++;console.log('✓',n);}else{f++;conso
   }
   A('outside frame ignored', hits===0, 'hits='+hits);
 }
-// weak noise: 1px global-ish inside frame - stamp tiny changes
+// weak noise: flat +1 inside frame
 {
   let prev=gray();
   const cur=gray(g=>{ for(let i=0;i<g.length;i++) g[i]=49; });
   A('weak flat motion no peak', peak(prev,cur)==null);
+}
+// handshake-like: many mid changes across ROI
+{
+  let prev=gray();
+  const cur=gray(g=>{
+    for(let y=Math.floor(AH*FRAME_Y0); y<Math.ceil(AH*FRAME_Y1); y++)
+      for(let x=Math.floor(AW*FRAME_X0); x<Math.ceil(AW*FRAME_X1); x++)
+        g[y*AW+x]=48+((x+y)%3===0?22:8);
+  });
+  A('handshake-like spread rejected', peak(prev,cur)==null);
 }
 
 console.log(`\n${p} passed, ${f} failed`); if(f) process.exit(1);

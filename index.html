@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - PRECISION FRAME v4.2</title>
+    <title>AIスピードガン プロ - CALM FRAME v4.3</title>
     <meta name="description" content="カメラ映像から投球・指先スワイプ速度を計測する高精度スピードガン">
     <meta name="theme-color" content="#0F172A">
     <meta name="mobile-web-app-capable" content="yes">
@@ -114,11 +114,10 @@
     
     <!-- ガイドフレーム -->
     <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-        <div id="guide-frame" class="w-4/5 h-1/3 border-2 border-dashed border-[#ccff00]/40 rounded-2xl flex flex-col items-center justify-end pb-3 transition-colors duration-300 relative overflow-hidden">
-            <!-- 左右の進捗だけ（中央線は置かない） -->
-            <div id="guide-progress-left" class="absolute left-0 top-0 bottom-0 w-1 bg-[#ccff00] opacity-0 transition-opacity duration-150"></div>
-            <div id="guide-progress-right" class="absolute right-0 top-0 bottom-0 w-1 bg-[#ccff00] opacity-0 transition-opacity duration-150"></div>
-            <span id="guide-text" class="text-[10px] text-[#ccff00] font-bold bg-black/45 px-2.5 py-1 rounded-full tracking-wide">枠を左右にしっかり横切る</span>
+        <div id="guide-frame" class="w-4/5 h-1/3 border-2 border-dashed border-[#ccff00]/35 rounded-2xl relative overflow-hidden">
+            <!-- 枠内テキストは出さない。左右端のごく薄い進捗のみ -->
+            <div id="guide-progress-left" class="absolute left-0 top-0 bottom-0 w-0.5 bg-[#ccff00] opacity-0 transition-opacity duration-200"></div>
+            <div id="guide-progress-right" class="absolute right-0 top-0 bottom-0 w-0.5 bg-[#ccff00] opacity-0 transition-opacity duration-200"></div>
         </div>
     </div>
     
@@ -137,7 +136,7 @@
                     </div>
                     <div class="leading-tight">
                         <h1 class="text-[10px] font-black italic text-white uppercase">AI SPEED ANALYZER</h1>
-                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">PRECISION FRAME v4.2</p>
+                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CALM FRAME v4.3</p>
                     </div>
                 </div>
                 <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive w-full min-w-0 box-border">
@@ -239,7 +238,7 @@
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">06</span>
-                <span><b>v4.2 精密通過:</b> 枠を通らない微動には反応しません。ガイド枠を左から右（または右から左）へしっかり横切ったときだけ計測します。スマホはできるだけ固定を。</span>
+                <span><b>v4.3 静穏通過:</b> 手ブレや微動では反応しにくくしています。ガイド枠を左から右（または右から左）へしっかり横切ったときだけ計測します。できればスマホを固定してください。</span>
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">07</span>
@@ -276,39 +275,38 @@
     const statusBadge = document.getElementById('status-badge');
     const holdBadge = document.getElementById('hold-badge');
     const guideFrame = document.getElementById('guide-frame');
-    const guideText = document.getElementById('guide-text');
     const guideProgL = document.getElementById('guide-progress-left');
     const guideProgR = document.getElementById('guide-progress-right');
     const distInput = document.getElementById('dist-input');
     const visibleFracSelect = document.getElementById('visible-frac');
     const ctx = canvas.getContext('2d');
 
-    // ---- PRECISION FRAME v4.2 ---------------------------------------------
-    // 枠を通らない微動・手ブレには反応しない。
-    // ガイド枠を左右にしっかり横切った軌道だけ精密計測する。
+    // ---- CALM FRAME v4.3 --------------------------------------------------
+    // 枠内テキストなし。手ブレ／微動は弾き、左右ゾーンを渡る軌道だけ計測。
     const AW = 320;
     const AH = 180;
     const FRAME_X0 = 0.10;   // = HTML w-4/5
     const FRAME_X1 = 0.90;
     const FRAME_Y0 = 0.335;  // = HTML h-1/3
     const FRAME_Y1 = 0.665;
-    const MOTION_THR = 12;           // 微差は無視
-    const MIN_MOTION_PIXELS = 10;    // 小さすぎるノイズ無視
-    const MAX_MOTION_PIXELS = 1400;  // 枠内全面揺れ＝手ブレ
-    const MIN_PEAKINESS = 0.08;      // 尖った塊だけ
-    const MIN_PEAK_ENERGY = 250;     // 弱すぎる差分無視
-    const MIN_STEP_RATIO = 0.004;    // フレーム間の極小移動は捨てる
-    const MIN_DX_RATIO = 0.10;       // ガイド幅比で横断が必要（下で guide 基準）
-    const MIN_GUIDE_SPAN = 0.28;     // ガイド幅の28%以上の正味移動
-    const ZONE_RATIO = 0.18;         // 左右ゾーン（通過判定）
-    const MIN_LINEARITY = 0.55;
-    const MIN_DIR = 0.65;
-    const MIN_POINTS = 3;
+    const MOTION_THR = 18;           // 微差・手ブレの薄ノイズは無視
+    const MIN_MOTION_PIXELS = 14;    // 小さすぎるノイズ無視
+    const MAX_MOTION_PIXELS = 780;   // 枠内が広く揺れたら手ブレ
+    const MIN_PEAKINESS = 0.11;      // 尖った塊だけ（平坦＝ブレ）。移動時の双峰も許容
+    const MIN_PEAK_ENERGY = 380;     // 弱すぎる差分無視
+    const MIN_STEP_RATIO = 0.010;    // フレーム間の極小移動は捨てる
+    const MIN_DX_RATIO = 0.14;       // 画面幅比でも十分な横断が必要
+    const MIN_GUIDE_SPAN = 0.40;     // ガイド幅の40%以上の正味移動
+    const ZONE_RATIO = 0.22;         // 左右ゾーン（通過必須）
+    const MIN_LINEARITY = 0.70;
+    const MIN_DIR = 0.78;
+    const MIN_POINTS = 4;
     const MIN_SPEED = 8;
     const MAX_SPEED = 180;
-    const WARMUP_MS = 350;
-    const TRACK_MAX_AGE = 900;
-    const UI_ACTIVATE_DX = 0.04;     // これ未満はUIも静かに
+    const WARMUP_MS = 550;
+    const TRACK_MAX_AGE = 850;
+    const UI_ACTIVATE_DX = 0.18;     // 進捗UIは本気の横断から
+    const GUIDE_BORDER = 'rgba(204, 255, 0, 0.35)';
 
     let appState = 0;
     let maxSpeed = 0;
@@ -322,9 +320,11 @@
     let lastPos = null;
     let frames = 0;
     let lastUi = 0;
+    let idleFrames = 0;
 
     function setAppState(state) {
         appState = state;
+        guideFrame.style.borderColor = GUIDE_BORDER;
         if (state === 0) {
             mainBtn.innerText = '計測スタート';
             mainBtn.classList.remove('btn-reset');
@@ -334,8 +334,6 @@
             statusBadge.innerText = '準備完了';
             statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
             holdBadge.classList.add('hidden');
-            guideFrame.style.borderColor = 'rgba(204, 255, 0, 0.35)';
-            guideText.innerText = '枠を左右にしっかり横切る';
             speedDisplay.innerText = '---';
             clearProgress();
         } else if (state === 1) {
@@ -343,11 +341,9 @@
             mainBtn.disabled = true;
             mainBtn.style.opacity = '0.5';
             stopBtn.classList.remove('hidden');
-            statusBadge.innerText = '枠の通過を待っています';
-            statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-red-500 border border-red-500/20 animate-pulse';
+            statusBadge.innerText = '計測中';
+            statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
             holdBadge.classList.add('hidden');
-            guideFrame.style.borderColor = '#ef4444';
-            guideText.innerText = '枠の左→右（または右→左）へ';
             resetScan();
             scanStart = performance.now();
             fired = false;
@@ -360,8 +356,6 @@
             statusBadge.innerText = '計測完了';
             statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-yellow-500 border border-yellow-500/20';
             holdBadge.classList.remove('hidden');
-            guideFrame.style.borderColor = 'rgba(255,255,255,0.22)';
-            guideText.innerText = '完了';
             clearProgress();
         }
     }
@@ -380,6 +374,7 @@
         lastPos = null;
         prevGray = null;
         frames = 0;
+        idleFrames = 0;
         clearProgress();
     }
 
@@ -575,8 +570,13 @@
         const meanY0 = sumY / sumW;
         const spreadY = Math.sqrt(Math.max(0, sumY2 / sumW - meanY0 * meanY0));
         const spreadX = Math.sqrt(Math.max(0, sumX2 / sumW - meanX0 * meanX0));
-        // 縦に広がりすぎ＝手ブレ／人物
-        if (spreadY > (roi.y1 - roi.y0) * 0.42) return null;
+        const roiW = roi.x1 - roi.x0;
+        const roiH = roi.y1 - roi.y0;
+        // 広く散った差分＝手ブレ（コンパクトな塊だけ通す）
+        if (spreadY > roiH * 0.30) return null;
+        if (spreadX > roiW * 0.28) return null;
+        // 動いた画素がROIの広い割合を占める＝揺れ
+        if (motionPixels > roiW * roiH * 0.12) return null;
 
         let s = 0, sw = 0, sy = 0;
         for (let x = Math.max(roi.x0, peakX - 8); x <= Math.min(roi.x1 - 1, peakX + 8); x++) {
@@ -657,7 +657,7 @@
         return { dx, dy, dist, dt, dir, lin, speed, horizRatio, vx, vy };
     }
 
-    /** 左右ゾーンをまたいだ＝本当に枠を通った */
+    /** 左右ゾーンをまたいだ＝本当に枠を通った（手ブレ緩和のため必須） */
     function crossesGuideZones(pts) {
         if (pts.length < 2) return false;
         const left = canvas.width * FRAME_X0;
@@ -671,10 +671,7 @@
             if (p.x <= zL) sawL = true;
             if (p.x >= zR) sawR = true;
         }
-        if (sawL && sawR) return true;
-        // ゾーン未到達でもガイド幅の十分な横断ならOK
-        const st = netStats(pts);
-        return !!(st && st.dx >= w * MIN_GUIDE_SPAN);
+        return sawL && sawR;
     }
 
     function cleanTrack(pts) {
@@ -711,15 +708,28 @@
         const peak = samplePeak();
 
         if (peak) {
+            idleFrames = 0;
             const prev = track.length ? track[track.length - 1] : null;
             let ok = true;
             if (prev) {
                 const dt = peak.t - prev.t;
                 const jump = Math.hypot(peak.x - prev.x, peak.y - prev.y);
-                if (dt < 8) ok = false;
-                if (jump > canvas.width * 0.55) ok = false;
-                // わずかな移動は軌道に足さない（枠外ノイズ・手ブレの主因）
-                if (jump < Math.max(3, canvas.width * MIN_STEP_RATIO)) ok = false;
+                const dx = peak.x - prev.x;
+                const dy = peak.y - prev.y;
+                if (dt < 10) ok = false;
+                if (jump > canvas.width * 0.48) ok = false;
+                // わずかな移動は軌道に足さない（手ブレの主因）
+                if (jump < Math.max(4, canvas.width * MIN_STEP_RATIO)) ok = false;
+                // ほぼ縦だけ動く＝手ブレ／上下揺れ
+                if (Math.abs(dx) < Math.abs(dy) * 0.85) ok = false;
+                // 進行方向がすぐ逆転する短い揺れは捨ててやり直す
+                if (track.length >= 2) {
+                    const prevDx = prev.x - track[track.length - 2].x;
+                    if (Math.abs(prevDx) > 3 && Math.abs(dx) > 3 && Math.sign(prevDx) !== Math.sign(dx)) {
+                        track = [];
+                        ok = false;
+                    }
+                }
             }
             if (ok) {
                 track.push({
@@ -730,6 +740,13 @@
                     p: peak.peakiness
                 });
             }
+        } else {
+            idleFrames++;
+            // ピークが途切れた短い揺れは蓄積しない
+            if (idleFrames >= 4 && track.length && track.length < MIN_POINTS + 1) {
+                track = [];
+                clearProgress();
+            }
         }
 
         track = track.filter(p => now - p.t < TRACK_MAX_AGE && inGuideStrict(p.x, p.y));
@@ -738,22 +755,14 @@
             ? { x: track[track.length - 1].x, y: track[track.length - 1].y }
             : null;
 
-        if (track.length && prog >= UI_ACTIVATE_DX) {
-            if (now - lastUi > 100) {
-                lastUi = now;
-                const pct = Math.round(prog * 100);
-                const ready = prog >= 1 && crossesGuideZones(track);
-                statusBadge.innerText = ready ? '通過を検出 — 確定中' : ('横断進捗 ' + pct + '%');
-                statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-[#ccff00] border border-[#ccff00]/40';
-                guideFrame.style.borderColor = '#ccff00';
-                guideText.innerText = ready ? 'いい軌道です' : 'そのまま枠を渡りきって';
-            }
-        } else if (!track.length || prog < UI_ACTIVATE_DX) {
-            if (now - scanStart > WARMUP_MS && now - lastUi > 800) {
-                lastUi = now;
-                statusBadge.innerText = '枠の通過を待っています';
-                guideText.innerText = '枠の左→右（または右→左）へ';
-                guideFrame.style.borderColor = '#ef4444';
+        // 枠は色を変えず、下のステータスだけ落ち着いて更新
+        if (now - lastUi > 500) {
+            lastUi = now;
+            if (track.length && prog >= UI_ACTIVATE_DX) {
+                statusBadge.innerText = '計測中';
+                statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
+            } else if (now - scanStart > WARMUP_MS) {
+                statusBadge.innerText = '計測中';
                 clearProgress();
             }
         }
@@ -776,11 +785,11 @@
 
         const need = Math.max(guideWidthPx() * MIN_GUIDE_SPAN, canvas.width * MIN_DX_RATIO);
         if (st.dx < need) return;
-        if (st.dx < st.dy * 0.9) return;
-        if (st.dt < 0.02 || st.dt > 1.0) return;
+        if (st.dx < st.dy * 1.25) return; // 横移動が明確であること
+        if (st.dt < 0.03 || st.dt > 0.85) return;
         if (st.lin < MIN_LINEARITY) return;
         if (st.dir < MIN_DIR) return;
-        if (st.horizRatio < 0.5) return;
+        if (st.horizRatio < 0.62) return;
 
         // 回帰速度を主、端点速度を補助
         let kmh = toKmhFromSpeed(st.speed);
