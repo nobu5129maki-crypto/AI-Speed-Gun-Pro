@@ -598,8 +598,9 @@
         // 軽い揺れだけのフレームは peak なしで shake=soft（軌道は消さない）
         const softShake = !compactObject && (
             (cornerHits >= 3 && peakiness < COMPACT_PEAKINESS) ||
-            (coverage > 0.16 && peakiness < MIN_PEAKINESS) ||
-            (spreadY > MAX_SPREAD_Y * 1.25 && !compactObject)
+            (coverage > 0.12 && peakiness < MIN_PEAKINESS) ||
+            (count > 180 && peakiness < 0.07) ||
+            (spreadY > MAX_SPREAD_Y * 1.25)
         );
 
         if (heavyShake && !compactObject) {

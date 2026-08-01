@@ -97,7 +97,8 @@ function analyze(data, prev) {
     (cornerHits >= 4 && peakiness < MIN_PEAKINESS);
   const softShake = !compactObject && (
     (cornerHits >= 3 && peakiness < COMPACT_PEAKINESS) ||
-    (coverage > 0.16 && peakiness < MIN_PEAKINESS)
+    (coverage > 0.12 && peakiness < MIN_PEAKINESS) ||
+    (count > 180 && peakiness < 0.07)
   );
   if (heavyShake && !compactObject) return { shake: 'heavy', peak: null };
   if (softShake && !compactObject) return { shake: 'soft', peak: null };
