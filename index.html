@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - CALM FRAME v4.4</title>
+    <title>AIスピードガン プロ - CALM FRAME v4.5</title>
     <meta name="description" content="カメラ映像から投球・指先スワイプ速度を計測する高精度スピードガン">
     <meta name="theme-color" content="#0F172A">
     <meta name="mobile-web-app-capable" content="yes">
@@ -136,7 +136,7 @@
                     </div>
                     <div class="leading-tight">
                         <h1 class="text-[10px] font-black italic text-white uppercase">AI SPEED ANALYZER</h1>
-                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CALM FRAME v4.4</p>
+                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CALM FRAME v4.5</p>
                     </div>
                 </div>
                 <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive w-full min-w-0 box-border">
@@ -238,7 +238,7 @@
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">06</span>
-                <span><b>v4.4 枠内精密:</b> 枠内の横断を拾いやすくし、速度は枠内軌道から精密に算出します。ガイド枠を左から右（または右から左）へ横切ってください。</span>
+                <span><b>v4.5 枠内精密:</b> 画面に見えているガイド枠と検出範囲を一致させ、枠を横切ると計測します。速度は枠内軌道から精密に算出します。</span>
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">07</span>
@@ -281,34 +281,37 @@
     const visibleFracSelect = document.getElementById('visible-frac');
     const ctx = canvas.getContext('2d');
 
-    // ---- CALM FRAME v4.4 --------------------------------------------------
-    // UIは静穏のまま。手ブレ判定は維持しつつ、枠内横断を確実に計測し精密化する。
+    // ---- CALM FRAME v4.5 --------------------------------------------------
+    // 手ブレ時の静穏UIは維持。表示中のカバー領域＝ガイド枠に検出を一致させ、
+    // 出現ピークで枠内横断を確実に計測する。
     const AW = 320;
     const AH = 180;
-    const FRAME_X0 = 0.10;   // = HTML w-4/5
+    const FRAME_X0 = 0.10;   // = HTML w-4/5（表示領域基準）
     const FRAME_X1 = 0.90;
     const FRAME_Y0 = 0.335;  // = HTML h-1/3
     const FRAME_Y1 = 0.665;
-    // --- 手ブレ系（v4.3 の感度を維持）---
-    const MOTION_THR = 18;
-    const MIN_MOTION_PIXELS = 14;
+    // --- 手ブレ系（広い揺れだけ弾く／UI反応は静穏のまま）---
+    const MOTION_THR = 14;
+    const MIN_MOTION_PIXELS = 8;
     const MAX_MOTION_PIXELS = 780;
-    const MIN_PEAKINESS = 0.11;
-    const MIN_PEAK_ENERGY = 380;
+    const SHAKE_SPREAD_Y = 0.42;
+    const SHAKE_ROI_FRAC = 0.20;
     const GUIDE_BORDER = 'rgba(204, 255, 0, 0.35)';
-    // --- 枠内計測（拾いやすさ＋精度）---
-    const MIN_STEP_RATIO = 0.0035;   // 小さな横移動も軌道に載せる
-    const MIN_DX_RATIO = 0.08;
-    const MIN_GUIDE_SPAN = 0.22;     // 枠幅の22%で確定可能に
-    const ZONE_RATIO = 0.14;         // 左右ゾーンを少し広げて拾いやすく
-    const MIN_LINEARITY = 0.48;
-    const MIN_DIR = 0.58;
+    // --- 枠内物体（出現ピーク）---
+    const MIN_RISE_PEAKINESS = 0.08;
+    const MIN_RISE_ENERGY = 160;
+    const MIN_STEP_RATIO = 0.0025;
+    const MIN_DX_RATIO = 0.06;
+    const MIN_GUIDE_SPAN = 0.18;
+    const ZONE_RATIO = 0.12;
+    const MIN_LINEARITY = 0.42;
+    const MIN_DIR = 0.52;
     const MIN_POINTS = 3;
-    const MIN_SPEED = 6;
+    const MIN_SPEED = 5;
     const MAX_SPEED = 180;
-    const WARMUP_MS = 280;
-    const TRACK_MAX_AGE = 1100;
-    const UI_ACTIVATE_DX = 0.10;
+    const WARMUP_MS = 220;
+    const TRACK_MAX_AGE = 1200;
+    const UI_ACTIVATE_DX = 0.08;
 
     let appState = 0;
     let maxSpeed = 0;
@@ -322,6 +325,7 @@
     let lastPos = null;
     let frames = 0;
     let lastUi = 0;
+    let viewCrop = { x: 0, y: 0, w: 1, h: 1 }; // video-pixel crop shown on screen
 
     function setAppState(state) {
         appState = state;
@@ -450,15 +454,37 @@
         }
     }
 
+    /** object-fit:cover で実際に見えている映像領域（video画素） */
+    function updateViewCrop() {
+        const vidW = video.videoWidth, vidH = video.videoHeight;
+        const vw = video.clientWidth || window.innerWidth;
+        const vh = video.clientHeight || window.innerHeight;
+        if (!vidW || !vidH || !vw || !vh) {
+            viewCrop = { x: 0, y: 0, w: vidW || 1, h: vidH || 1 };
+            return viewCrop;
+        }
+        const scale = Math.max(vw / vidW, vh / vidH);
+        const cropW = Math.min(vidW, vw / scale);
+        const cropH = Math.min(vidH, vh / scale);
+        viewCrop = {
+            x: (vidW - cropW) / 2,
+            y: (vidH - cropH) / 2,
+            w: cropW,
+            h: cropH
+        };
+        return viewCrop;
+    }
+
     function guideWidthPx() {
-        return canvas.width * (FRAME_X1 - FRAME_X0);
+        // 画面に見えている幅のうちガイド枠の横幅
+        return viewCrop.w * (FRAME_X1 - FRAME_X0);
     }
 
     function trackProgress(pts) {
         if (!pts.length) return 0;
         const st = netStats(pts);
         if (!st) return 0;
-        const need = Math.max(guideWidthPx() * MIN_GUIDE_SPAN, canvas.width * MIN_DX_RATIO);
+        const need = Math.max(guideWidthPx() * MIN_GUIDE_SPAN, viewCrop.w * MIN_DX_RATIO);
         return Math.min(1, st.dx / need);
     }
 
@@ -498,17 +524,23 @@
     }
 
     function inGuideStrict(x, y) {
-        const left = canvas.width * FRAME_X0;
-        const right = canvas.width * FRAME_X1;
-        const top = canvas.height * FRAME_Y0;
-        const bottom = canvas.height * FRAME_Y1;
-        // マージンほぼなし＝枠外はカウントしない
+        const c = viewCrop;
+        const left = c.x + c.w * FRAME_X0;
+        const right = c.x + c.w * FRAME_X1;
+        const top = c.y + c.h * FRAME_Y0;
+        const bottom = c.y + c.h * FRAME_Y1;
         return x >= left && x <= right && y >= top && y <= bottom;
     }
 
     function samplePeak() {
         if (!analysisCtx) return null;
-        analysisCtx.drawImage(video, 0, 0, AW, AH);
+        const crop = updateViewCrop();
+        // 画面に見えている領域だけを解析（ガイド枠と一致）
+        analysisCtx.drawImage(
+            video,
+            crop.x, crop.y, crop.w, crop.h,
+            0, 0, AW, AH
+        );
         const rgba = analysisCtx.getImageData(0, 0, AW, AH).data;
         const gray = toGray(rgba);
 
@@ -518,11 +550,11 @@
         }
 
         const roi = getGuideRoi();
-        const col = new Float32Array(AW);
-        const colY = new Float32Array(AW);
-        const colYW = new Float32Array(AW);
+        const riseCol = new Float32Array(AW);
+        const riseY = new Float32Array(AW);
+        const riseYW = new Float32Array(AW);
         let motionPixels = 0;
-        let sumX2 = 0, sumY2 = 0, sumX = 0, sumY = 0, sumW = 0;
+        let sumY2 = 0, sumY = 0, sumW = 0;
 
         for (let y = roi.y0; y < roi.y1; y++) {
             const row = y * AW;
@@ -531,56 +563,49 @@
                 const prev = prevGray[row + x];
                 const d = Math.abs(now - prev);
                 if (d < MOTION_THR) continue;
-                // 出現側（今明るい／変化で増えた）を優先＝物体の現在位置
-                // 消えた残像は弱く扱い、ピーク分裂を防ぐ
-                const rising = now > prev;
-                const bright = now > 110;
-                const boost = (rising ? 1.6 : 0.35) * (bright ? 1.25 : 1);
-                const w = d * d * boost;
-                col[x] += w;
-                colY[x] += y * w;
-                colYW[x] += w;
-                sumX += x * w;
-                sumY += y * w;
-                sumX2 += x * x * w;
-                sumY2 += y * y * w;
-                sumW += w;
                 motionPixels++;
+                sumW += d;
+                sumY += y * d;
+                sumY2 += y * y * d;
+
+                // 出現側だけを物体位置に使う（残像でピークが割れない）
+                if (now <= prev) continue;
+                const bright = now > 100 ? 1.3 : (now > 70 ? 1.1 : 1.0);
+                const w = d * d * bright;
+                riseCol[x] += w;
+                riseY[x] += y * w;
+                riseYW[x] += w;
             }
         }
 
         prevGray = gray;
         frames++;
 
-        if (motionPixels < MIN_MOTION_PIXELS || motionPixels > MAX_MOTION_PIXELS || sumW <= 0) {
-            return null;
-        }
-
-        let peakX = -1, peakE = 0, totalE = 0;
-        for (let x = roi.x0; x < roi.x1; x++) {
-            totalE += col[x];
-            if (col[x] > peakE) { peakE = col[x]; peakX = x; }
-        }
-        if (peakX < 0 || peakE < MIN_PEAK_ENERGY) return null;
-
-        const peakiness = peakE / (totalE + 1e-6);
-        if (peakiness < MIN_PEAKINESS) return null; // 平坦＝枠内手ブレ
-
-        const meanX0 = sumX / sumW;
-        const meanY0 = sumY / sumW;
-        const spreadY = Math.sqrt(Math.max(0, sumY2 / sumW - meanY0 * meanY0));
-        const spreadX = Math.sqrt(Math.max(0, sumX2 / sumW - meanX0 * meanX0));
+        // 手ブレ: 広く動いた／縦に散った場合は無視（UIは静穏）
         const roiW = roi.x1 - roi.x0;
         const roiH = roi.y1 - roi.y0;
-        // 手ブレ維持: 縦に広く散る／ROI大半が動く場合のみ弾く
-        // （横広がりは移動物体の双峰で naturally 増えるので計測側では緩め）
-        if (spreadY > roiH * 0.38) return null;
-        if (motionPixels > roiW * roiH * 0.22) return null;
+        if (motionPixels < MIN_MOTION_PIXELS || motionPixels > MAX_MOTION_PIXELS) return null;
+        if (motionPixels > roiW * roiH * SHAKE_ROI_FRAC) return null;
+        if (sumW > 0) {
+            const meanY0 = sumY / sumW;
+            const spreadY = Math.sqrt(Math.max(0, sumY2 / sumW - meanY0 * meanY0));
+            if (spreadY > roiH * SHAKE_SPREAD_Y) return null;
+        }
 
-        // サブピクセル峰值（3点放物線）＋近傍重心で枠内位置精度を上げる
+        let peakX = -1, peakE = 0, totalRise = 0;
+        for (let x = roi.x0; x < roi.x1; x++) {
+            totalRise += riseCol[x];
+            if (riseCol[x] > peakE) { peakE = riseCol[x]; peakX = x; }
+        }
+        if (peakX < 0 || peakE < MIN_RISE_ENERGY || totalRise <= 0) return null;
+
+        const peakiness = peakE / (totalRise + 1e-6);
+        if (peakiness < MIN_RISE_PEAKINESS) return null;
+
+        // サブピクセル峰值＋近傍重心
         let peakXf = peakX;
         if (peakX > roi.x0 && peakX < roi.x1 - 1) {
-            const ym1 = col[peakX - 1], y0 = col[peakX], yp1 = col[peakX + 1];
+            const ym1 = riseCol[peakX - 1], y0 = riseCol[peakX], yp1 = riseCol[peakX + 1];
             const denom = (ym1 - 2 * y0 + yp1);
             if (Math.abs(denom) > 1e-6) {
                 const delta = 0.5 * (ym1 - yp1) / denom;
@@ -589,20 +614,19 @@
         }
 
         let s = 0, sw = 0, sy = 0;
-        for (let x = Math.max(roi.x0, Math.floor(peakXf) - 6); x <= Math.min(roi.x1 - 1, Math.ceil(peakXf) + 6); x++) {
-            const e = col[x];
+        for (let x = Math.max(roi.x0, Math.floor(peakXf) - 5); x <= Math.min(roi.x1 - 1, Math.ceil(peakXf) + 5); x++) {
+            const e = riseCol[x];
             if (e <= 0) continue;
             s += x * e;
             sw += e;
-            if (colYW[x] > 0) sy += (colY[x] / colYW[x]) * e;
+            if (riseYW[x] > 0) sy += (riseY[x] / riseYW[x]) * e;
         }
-        const meanX = sw > 0 ? (0.55 * peakXf + 0.45 * (s / sw)) : peakXf;
-        const meanY = sw > 0 ? sy / sw : meanY0;
+        const meanX = sw > 0 ? (0.6 * peakXf + 0.4 * (s / sw)) : peakXf;
+        const meanY = sw > 0 ? sy / sw : (roi.y0 + roi.y1) * 0.5;
 
-        const scaleX = canvas.width / AW;
-        const scaleY = canvas.height / AH;
-        const cx = meanX * scaleX;
-        const cy = meanY * scaleY;
+        // 解析座標 → video画素（カバー領域）
+        const cx = crop.x + (meanX / AW) * crop.w;
+        const cy = crop.y + (meanY / AH) * crop.h;
         if (!inGuideStrict(cx, cy)) return null;
 
         return {
@@ -611,9 +635,7 @@
             t: performance.now(),
             energy: peakE,
             peakiness,
-            motionPixels,
-            spreadX,
-            spreadY
+            motionPixels
         };
     }
 
@@ -687,8 +709,8 @@
     /** 左右ゾーン通過、またはガイド幅の十分な横断 */
     function crossesGuideZones(pts) {
         if (pts.length < 2) return false;
-        const left = canvas.width * FRAME_X0;
-        const right = canvas.width * FRAME_X1;
+        const left = viewCrop.x + viewCrop.w * FRAME_X0;
+        const right = viewCrop.x + viewCrop.w * FRAME_X1;
         const w = right - left;
         const zL = left + w * ZONE_RATIO;
         const zR = right - w * ZONE_RATIO;
@@ -707,15 +729,15 @@
         if (pts.length < 3) return pts.slice();
         const st = netStats(pts);
         if (!st) return pts.slice();
-        // 回帰直線からの外れを落とす（枠内軌道の精度向上）
         const t0 = pts[0].t;
         const kept = [];
+        const tol = Math.max(40, viewCrop.w * 0.06);
         for (const p of pts) {
             const t = (p.t - t0) / 1000;
             const ex = pts[0].x + st.vx * t;
             const ey = pts[0].y + st.vy * t;
             const err = Math.hypot(p.x - ex, p.y - ey);
-            if (err < Math.max(36, canvas.width * 0.055)) kept.push(p);
+            if (err < tol) kept.push(p);
         }
         return kept.length >= 3 ? kept : pts.slice();
     }
@@ -731,9 +753,10 @@
     function toKmhFromSpeed(pxPerSec) {
         const totalDist = parseFloat(distInput.value) || 18.44;
         const vis = parseFloat(visibleFracSelect.value) || 0.33;
-        const mpp = (totalDist * vis) / Math.max(1, canvas.width);
+        // 画面に見えている横幅（カバー領域）を基準に換算＝精度向上
+        const widthPx = Math.max(1, viewCrop.w || canvas.width);
+        const mpp = (totalDist * vis) / widthPx;
         let kmh = pxPerSec * mpp * 3.6;
-        // サイド撮影の穏やかな補正（一重のみ）
         if (vis <= 0.25) kmh *= 0.9;
         else if (vis <= 0.33) kmh *= 0.93;
         else if (vis <= 0.5) kmh *= 0.96;
@@ -742,6 +765,7 @@
 
     function process() {
         const now = performance.now();
+        updateViewCrop();
         const peak = samplePeak();
 
         if (peak) {
@@ -750,10 +774,9 @@
             if (prev) {
                 const dt = peak.t - prev.t;
                 const jump = Math.hypot(peak.x - prev.x, peak.y - prev.y);
-                if (dt < 8) ok = false;
-                if (jump > canvas.width * 0.58) ok = false;
-                // 極小移動のみ除外（手ブレの微動はここ＋peak側で抑制）
-                if (jump < Math.max(2.5, canvas.width * MIN_STEP_RATIO)) ok = false;
+                if (dt < 6) ok = false;
+                if (jump > viewCrop.w * 0.65) ok = false;
+                if (jump < Math.max(2, viewCrop.w * MIN_STEP_RATIO)) ok = false;
             }
             if (ok) {
                 track.push({
@@ -772,7 +795,6 @@
             ? { x: track[track.length - 1].x, y: track[track.length - 1].y }
             : null;
 
-        // 枠は色を変えず、下のステータスだけ落ち着いて更新
         if (now - lastUi > 500) {
             lastUi = now;
             statusBadge.innerText = '計測中';
@@ -791,25 +813,23 @@
         const core = coreSegment(cleaned);
         const use = core.length >= MIN_POINTS ? core : cleaned;
 
-        // 全点が枠内（厳密）
         if (!use.every(p => inGuideStrict(p.x, p.y))) return;
         if (!crossesGuideZones(use) && !crossesGuideZones(cleaned)) return;
 
         const st = netStats(use);
         if (!st) return;
 
-        const need = Math.max(guideWidthPx() * MIN_GUIDE_SPAN, canvas.width * MIN_DX_RATIO);
+        const need = Math.max(guideWidthPx() * MIN_GUIDE_SPAN, viewCrop.w * MIN_DX_RATIO);
         if (st.dx < need) return;
-        if (st.dx < st.dy * 0.75) return;
-        if (st.dt < 0.018 || st.dt > 1.2) return;
+        if (st.dx < st.dy * 0.55) return;
+        if (st.dt < 0.015 || st.dt > 1.4) return;
         if (st.lin < MIN_LINEARITY) return;
         if (st.dir < MIN_DIR) return;
-        if (st.horizRatio < 0.45) return;
+        if (st.horizRatio < 0.38) return;
 
-        // 枠内コア軌道の速度を主、端点速度を補助
         let kmh = toKmhFromSpeed(st.speed);
         const endpoint = toKmhFromSpeed(st.dist / st.dt);
-        kmh = kmh * 0.82 + endpoint * 0.18;
+        kmh = kmh * 0.84 + endpoint * 0.16;
 
         if (!isFinite(kmh) || kmh < MIN_SPEED || kmh > MAX_SPEED) return;
 
