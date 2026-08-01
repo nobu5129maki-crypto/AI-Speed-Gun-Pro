@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - CALM FRAME v4.6</title>
+    <title>AIスピードガン プロ - CALM FRAME v4.7</title>
     <meta name="description" content="カメラ映像から投球・指先スワイプ速度を計測する高精度スピードガン">
     <meta name="theme-color" content="#0F172A">
     <meta name="mobile-web-app-capable" content="yes">
@@ -136,7 +136,7 @@
                     </div>
                     <div class="leading-tight">
                         <h1 class="text-[10px] font-black italic text-white uppercase">AI SPEED ANALYZER</h1>
-                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CALM FRAME v4.6</p>
+                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CALM FRAME v4.7</p>
                     </div>
                 </div>
                 <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive w-full min-w-0 box-border">
@@ -234,11 +234,11 @@
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">05</span>
-                <span><b>白い壁:</b> v4.6 で誤計測を抑えています。それでも不安定なら、模様や色のある背景にするかスマホを固定してください。</span>
+                <span><b>白い壁:</b> v4.7 でさらに厳しくしています。白壁では枠の左端から右端までしっかり横切ったときだけ計測します。可能なら模様のある背景かスマホ固定を。</span>
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">06</span>
-                <span><b>v4.6 白壁ガード:</b> 白い壁など明るい一様背景では、わずかな手ブレで誤計測しないよう自動で厳しくします。枠をしっかり左右に横切ってください。</span>
+                <span><b>v4.7 白壁ロック:</b> 白い壁では左右ゾーンの完全通過が必要です。わずかな移動や手ブレでは計測しません。</span>
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">07</span>
@@ -281,9 +281,8 @@
     const visibleFracSelect = document.getElementById('visible-frac');
     const ctx = canvas.getContext('2d');
 
-    // ---- CALM FRAME v4.6 --------------------------------------------------
-    // 表示ガイド一致＋出現ピーク計測。白い壁など明るい平坦背景では
-    // 自動で厳しくし、わずかな移動での誤計測を抑える。
+    // ---- CALM FRAME v4.7 --------------------------------------------------
+    // 白壁では左右ゾーン完全通過を必須にし、全体ずれ・微動による誤計測を強く抑止。
     const AW = 320;
     const AH = 180;
     const FRAME_X0 = 0.10;   // = HTML w-4/5（表示領域基準）
@@ -312,9 +311,10 @@
     const WARMUP_MS = 220;
     const TRACK_MAX_AGE = 1200;
     const UI_ACTIVATE_DX = 0.08;
-    // --- 白壁ガード ---
-    const WHITE_MEAN = 145;
-    const WHITE_STD = 32;
+    // --- 白壁ロック（広めに判定＋厳しく計測）---
+    const WHITE_MEAN = 130;
+    const WHITE_STD = 48;
+    const WHITE_BRIGHT_MEAN = 165; // 十分明るければ std が大きくても白壁扱い
 
     let appState = 0;
     let maxSpeed = 0;
@@ -569,21 +569,25 @@
         }
         const meanBg = sumBg / Math.max(1, nBg);
         const stdBg = Math.sqrt(Math.max(0, sumBg2 / Math.max(1, nBg) - meanBg * meanBg));
-        const whiteWall = meanBg >= WHITE_MEAN && stdBg <= WHITE_STD;
-        const brightScene = meanBg >= WHITE_MEAN - 15;
+        // 明るい一様〜ややムラのある白壁も広く拾う
+        const whiteWall = (meanBg >= WHITE_MEAN && stdBg <= WHITE_STD) || meanBg >= WHITE_BRIGHT_MEAN;
+        const brightScene = !whiteWall && meanBg >= WHITE_MEAN - 10;
 
-        // 白壁では閾値を上げ、薄いカメラノイズ／微動を落とす
-        const thr = whiteWall ? 26 : (brightScene ? 18 : MOTION_THR);
-        const minPeakiness = whiteWall ? 0.18 : MIN_RISE_PEAKINESS;
-        const minEnergy = whiteWall ? 360 : MIN_RISE_ENERGY;
-        const maxRoiFrac = whiteWall ? 0.09 : SHAKE_ROI_FRAC;
-        const maxMotion = whiteWall ? 420 : MAX_MOTION_PIXELS;
+        // 白壁ではさらに厳しく（微動・全体ずれを落とす）
+        const thr = whiteWall ? 34 : (brightScene ? 20 : MOTION_THR);
+        const minPeakiness = whiteWall ? 0.10 : MIN_RISE_PEAKINESS;
+        const minCompact = whiteWall ? 0.52 : 0; // ピーク近傍にエネルギーが集中しているか
+        const minEnergy = whiteWall ? 500 : MIN_RISE_ENERGY;
+        const maxRoiFrac = whiteWall ? 0.055 : SHAKE_ROI_FRAC;
+        const maxMotion = whiteWall ? 280 : MAX_MOTION_PIXELS;
+        const minContrast = whiteWall ? 34 : (brightScene ? 16 : 0);
 
         const objCol = new Float32Array(AW);
         const objY = new Float32Array(AW);
         const objYW = new Float32Array(AW);
         let motionPixels = 0;
         let sumY2 = 0, sumY = 0, sumW = 0;
+        let sumX2 = 0, sumX = 0;
 
         for (let y = roi.y0; y < roi.y1; y++) {
             const row = y * AW;
@@ -596,15 +600,17 @@
                 sumW += d;
                 sumY += y * d;
                 sumY2 += y * y * d;
+                sumX += x * d;
+                sumX2 += x * x * d;
 
                 let boost;
                 if (whiteWall || brightScene) {
-                    // 白壁: 背景と差がある画素だけ（暗い指も明るい球も）。壁ノイズは捨てる
+                    // 白壁: 背景と明確に差がある塊だけ。薄い影・ノイズは捨てる
                     const contrast = Math.abs(now - meanBg);
-                    if (contrast < (whiteWall ? 16 : 12)) continue;
-                    boost = contrast > 40 ? 1.55 : (contrast > 24 ? 1.25 : 0.7);
-                    // 現在コントラストがある側を優先（指が来た位置／球がある位置）
-                    boost *= (contrast >= Math.abs(prev - meanBg) ? 1.25 : 0.45);
+                    if (contrast < minContrast) continue;
+                    boost = contrast > 55 ? 1.7 : (contrast > 40 ? 1.35 : 0.55);
+                    // 今フレームでコントラストが大きい側＝物体の現在位置
+                    boost *= (contrast >= Math.abs(prev - meanBg) + 4 ? 1.3 : 0.35);
                 } else {
                     // 通常: 出現側のみ（残像分裂を防ぐ）
                     if (now <= prev) continue;
@@ -620,19 +626,23 @@
         prevGray = gray;
         frames++;
 
-        // 手ブレ / 白壁シマー: 広く動いた／縦に散った／列が多すぎる
+        // 手ブレ / 白壁シマー: 広く動いた／縦横に散った／列が多すぎる
         if (motionPixels < MIN_MOTION_PIXELS || motionPixels > maxMotion) return null;
         if (motionPixels > roiW * roiH * maxRoiFrac) return null;
         if (sumW > 0) {
             const meanY0 = sumY / sumW;
+            const meanX0 = sumX / sumW;
             const spreadY = Math.sqrt(Math.max(0, sumY2 / sumW - meanY0 * meanY0));
-            const spreadLim = whiteWall ? SHAKE_SPREAD_Y * 0.78 : SHAKE_SPREAD_Y;
+            const spreadX = Math.sqrt(Math.max(0, sumX2 / sumW - meanX0 * meanX0));
+            const spreadLim = whiteWall ? SHAKE_SPREAD_Y * 0.55 : SHAKE_SPREAD_Y;
             if (spreadY > roiH * spreadLim) return null;
+            // 白壁で横にも広く散る＝カメラ全体ずれ
+            if (whiteWall && spreadX > roiW * 0.22) return null;
         }
         let activeCols = 0;
         for (let x = roi.x0; x < roi.x1; x++) if (objCol[x] > 0) activeCols++;
-        // 白壁で多くの列が同時に微反応＝シマー（物体ではない）
-        if (whiteWall && activeCols > roiW * 0.28) return null;
+        // 白壁で多くの列が同時反応＝シマー／全体ずれ（物体ではない）
+        if (whiteWall && activeCols > Math.max(6, roiW * 0.14)) return null;
 
         let peakX = -1, peakE = 0, totalObj = 0;
         for (let x = roi.x0; x < roi.x1; x++) {
@@ -644,12 +654,45 @@
         const peakiness = peakE / (totalObj + 1e-6);
         if (peakiness < minPeakiness) return null;
 
+        // 白壁: ピーク±4列にエネルギーが集中（全体ずれ・シマー排除）
+        if (whiteWall && minCompact > 0) {
+            let near = 0;
+            for (let x = Math.max(roi.x0, peakX - 4); x <= Math.min(roi.x1 - 1, peakX + 4); x++) {
+                near += objCol[x];
+            }
+            if (near / (totalObj + 1e-6) < minCompact) return null;
+        }
+
+        // ピーク以外の列にもエネルギーが残る＝全体ずれ
+        let sideCols = 0;
+        const sideThr = peakE * 0.12;
+        for (let x = roi.x0; x < roi.x1; x++) {
+            if (Math.abs(x - peakX) <= 6) continue;
+            if (objCol[x] >= sideThr) sideCols++;
+        }
+        if (whiteWall && sideCols >= 3) return null;
+
         // ピーク近傍幅: 白壁では狭く尖っていること
         let halfW = 0;
-        const halfThr = peakE * 0.35;
+        const halfThr = peakE * 0.40;
         for (let x = peakX; x >= roi.x0 && objCol[x] >= halfThr; x--) halfW++;
         for (let x = peakX + 1; x < roi.x1 && objCol[x] >= halfThr; x++) halfW++;
-        if (whiteWall && halfW > Math.max(14, roiW * 0.12)) return null;
+        if (whiteWall && halfW > Math.max(14, roiW * 0.10)) return null;
+
+        // ピーク位置の現在輝度が背景と十分違うこと（薄い影を排除）
+        if (whiteWall) {
+            const px = Math.max(roi.x0, Math.min(roi.x1 - 1, Math.round(peakX)));
+            const py = Math.round((roi.y0 + roi.y1) * 0.5);
+            let local = 0, ln = 0;
+            for (let y = Math.max(roi.y0, py - 3); y <= Math.min(roi.y1 - 1, py + 3); y++) {
+                for (let x = Math.max(roi.x0, px - 3); x <= Math.min(roi.x1 - 1, px + 3); x++) {
+                    local += gray[y * AW + x];
+                    ln++;
+                }
+            }
+            const localMean = local / Math.max(1, ln);
+            if (Math.abs(localMean - meanBg) < 28) return null;
+        }
 
         // サブピクセル峰值＋近傍重心
         let peakXf = peakX;
@@ -756,8 +799,14 @@
         return { dx, dy, dist, dt, dir, lin, speed: fusedSpeed, horizRatio, vx, vy };
     }
 
-    /** 左右ゾーン通過、またはガイド幅の十分な横断 */
-    function crossesGuideZones(pts) {
+    function isWhiteTrack(pts) {
+        if (!pts.length) return false;
+        const n = pts.reduce((s, p) => s + (p.ww ? 1 : 0), 0);
+        return n >= Math.ceil(pts.length * 0.4);
+    }
+
+    /** 左右ゾーン通過。白壁では必ず両ゾーン。通常は横断距離でも可 */
+    function crossesGuideZones(pts, forceBothZones = false) {
         if (pts.length < 2) return false;
         const left = viewCrop.x + viewCrop.w * FRAME_X0;
         const right = viewCrop.x + viewCrop.w * FRAME_X1;
@@ -771,6 +820,7 @@
             if (p.x >= zR) sawR = true;
         }
         if (sawL && sawR) return true;
+        if (forceBothZones || isWhiteTrack(pts)) return false;
         const st = netStats(pts);
         return !!(st && st.dx >= w * MIN_GUIDE_SPAN);
     }
@@ -824,9 +874,26 @@
             if (prev) {
                 const dt = peak.t - prev.t;
                 const jump = Math.hypot(peak.x - prev.x, peak.y - prev.y);
+                const dx = peak.x - prev.x;
+                const dy = peak.y - prev.y;
+                const white = !!(peak.whiteWall || prev.ww);
+                const minStep = white
+                    ? Math.max(6, viewCrop.w * 0.012)
+                    : Math.max(2, viewCrop.w * MIN_STEP_RATIO);
                 if (dt < 6) ok = false;
                 if (jump > viewCrop.w * 0.65) ok = false;
-                if (jump < Math.max(2, viewCrop.w * MIN_STEP_RATIO)) ok = false;
+                if (jump < minStep) ok = false;
+                // 白壁: ほぼ縦揺れ・方向逆転の短い揺れは軌道を捨てる
+                if (white) {
+                    if (Math.abs(dx) < Math.abs(dy) * 1.1) ok = false;
+                    if (track.length >= 2) {
+                        const prevDx = prev.x - track[track.length - 2].x;
+                        if (Math.abs(prevDx) > 4 && Math.abs(dx) > 4 && Math.sign(prevDx) !== Math.sign(dx)) {
+                            track = [];
+                            ok = false;
+                        }
+                    }
+                }
             }
             if (ok) {
                 track.push({
@@ -838,6 +905,9 @@
                     ww: peak.whiteWall ? 1 : 0
                 });
             }
+        } else if (track.length && isWhiteTrack(track)) {
+            // 白壁でピークが途切れた短い軌道は捨てる（微動の蓄積防止）
+            if (track.length < 5) track = [];
         }
 
         track = track.filter(p => now - p.t < TRACK_MAX_AGE && inGuideStrict(p.x, p.y));
@@ -865,33 +935,39 @@
         const use = core.length >= MIN_POINTS ? core : cleaned;
 
         if (!use.every(p => inGuideStrict(p.x, p.y))) return;
-        if (!crossesGuideZones(use) && !crossesGuideZones(cleaned)) return;
+
+        const whiteMode = isWhiteTrack(use) || isWhiteTrack(cleaned);
+        // 白壁: 左右ゾーンの完全通過が必須（短い移動では絶対に確定しない）
+        if (whiteMode) {
+            if (!crossesGuideZones(use, true) && !crossesGuideZones(cleaned, true)) return;
+        } else if (!crossesGuideZones(use) && !crossesGuideZones(cleaned)) {
+            return;
+        }
 
         const st = netStats(use);
         if (!st) return;
 
-        // 白壁軌道は、より長い横断・直線性・方向一致を要求
-        const whiteHits = use.reduce((n, p) => n + (p.ww ? 1 : 0), 0);
-        const whiteMode = whiteHits >= Math.ceil(use.length * 0.5);
-        const spanNeed = whiteMode ? MIN_GUIDE_SPAN * 1.45 : MIN_GUIDE_SPAN;
-        const linNeed = whiteMode ? Math.max(MIN_LINEARITY, 0.62) : MIN_LINEARITY;
-        const dirNeed = whiteMode ? Math.max(MIN_DIR, 0.72) : MIN_DIR;
-        const minPts = whiteMode ? Math.max(MIN_POINTS, 4) : MIN_POINTS;
+        const spanNeed = whiteMode ? 0.42 : MIN_GUIDE_SPAN;
+        const linNeed = whiteMode ? 0.72 : MIN_LINEARITY;
+        const dirNeed = whiteMode ? 0.82 : MIN_DIR;
+        const minPts = whiteMode ? 5 : MIN_POINTS;
         if (use.length < minPts && cleaned.length < minPts) return;
 
-        const need = Math.max(guideWidthPx() * spanNeed, viewCrop.w * (whiteMode ? MIN_DX_RATIO * 1.35 : MIN_DX_RATIO));
+        const need = Math.max(guideWidthPx() * spanNeed, viewCrop.w * (whiteMode ? 0.16 : MIN_DX_RATIO));
         if (st.dx < need) return;
-        if (st.dx < st.dy * (whiteMode ? 1.0 : 0.55)) return;
-        if (st.dt < 0.015 || st.dt > 1.4) return;
+        if (st.dx < st.dy * (whiteMode ? 1.35 : 0.55)) return;
+        if (st.dt < (whiteMode ? 0.04 : 0.015) || st.dt > 1.4) return;
         if (st.lin < linNeed) return;
         if (st.dir < dirNeed) return;
-        if (st.horizRatio < (whiteMode ? 0.55 : 0.38)) return;
+        if (st.horizRatio < (whiteMode ? 0.65 : 0.38)) return;
 
         let kmh = toKmhFromSpeed(st.speed);
         const endpoint = toKmhFromSpeed(st.dist / st.dt);
         kmh = kmh * 0.84 + endpoint * 0.16;
 
         if (!isFinite(kmh) || kmh < MIN_SPEED || kmh > MAX_SPEED) return;
+        // 白壁の微動由来の異常に遅い/不安定値を捨てる
+        if (whiteMode && kmh < 8) return;
 
         fired = true;
         track = [];
