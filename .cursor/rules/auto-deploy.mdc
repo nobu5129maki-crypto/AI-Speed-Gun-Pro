@@ -1,0 +1,32 @@
+---
+description: 変更のたびに GitHub へ push し、Vercel 本番へ反映する
+alwaysApply: true
+---
+
+# AI Speed Gun Pro — 自動アップロード必須
+
+このリポジトリでは、コードや設定を変更したら **その都度** 必ず次を完了すること。途中で止めない。
+
+## 必須フロー
+
+1. 変更をコミットする（意味の分かるコミットメッセージ）
+2. 作業ブランチを `git push -u origin <branch>` で GitHub に上げる
+3. 本番反映のため **`main` にも push** する  
+   - 例: `git push origin HEAD:main`  
+   - または main にマージして push
+4. Vercel 本番デプロイを確認する  
+   - 本番 URL: https://ai-speed-gun-pro.vercel.app  
+   - `main` への push で Vercel GitHub Integration が Production を自動デプロイする
+5. 必要なら `scripts/ship.sh` を使ってよい
+
+## 禁止・注意
+
+- ローカルだけの変更で終了しない（未 push 禁止）
+- GitHub に上げただけで Vercel 確認を省略しない（`main` 反映まで）
+- push がネットワーク失敗したら指数バックオフで最大 4 回リトライ（4s / 8s / 16s / 32s）
+
+## 補助
+
+- 静的設定: `vercel.json`
+- CI: `.github/workflows/ci.yml`（push 時にテスト）
+- 手動一括: `bash scripts/ship.sh "commit message"`
