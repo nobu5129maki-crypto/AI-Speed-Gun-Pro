@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - CATCH MODE v4.0</title>
+    <title>AIスピードガン プロ - FRAME FOCUS v4.1</title>
     
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -108,8 +108,11 @@
     
     <!-- ガイドフレーム -->
     <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-        <div id="guide-frame" class="w-4/5 h-1/3 border-2 border-dashed border-[#ccff00]/40 rounded-2xl flex flex-col items-center justify-end pb-4 transition-colors duration-300">
-            <span id="guide-text" class="text-[10px] text-[#ccff00] font-bold bg-black/40 px-2 py-1 rounded">枠を指やボールで左右に横切ってください</span>
+        <div id="guide-frame" class="w-4/5 h-1/3 border-2 border-dashed border-[#ccff00]/40 rounded-2xl flex flex-col items-center justify-end pb-3 transition-colors duration-300 relative overflow-hidden">
+            <!-- 左右の進捗だけ（中央線は置かない） -->
+            <div id="guide-progress-left" class="absolute left-0 top-0 bottom-0 w-1 bg-[#ccff00] opacity-0 transition-opacity duration-150"></div>
+            <div id="guide-progress-right" class="absolute right-0 top-0 bottom-0 w-1 bg-[#ccff00] opacity-0 transition-opacity duration-150"></div>
+            <span id="guide-text" class="text-[10px] text-[#ccff00] font-bold bg-black/45 px-2.5 py-1 rounded-full tracking-wide">枠の中を左右に横切る</span>
         </div>
     </div>
     
@@ -128,7 +131,7 @@
                     </div>
                     <div class="leading-tight">
                         <h1 class="text-[10px] font-black italic text-white uppercase">AI SPEED ANALYZER</h1>
-                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CATCH MODE v4.0</p>
+                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">FRAME FOCUS v4.1</p>
                     </div>
                 </div>
                 <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive w-full min-w-0 box-border">
@@ -224,7 +227,7 @@
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">06</span>
-                <span><b>v4.0 CATCH:</b> 中央バンドの横移動を直接追跡します。緑の軌跡とバーが伸びたら計測直前です。指でもボールでも枠を左右に横切ってください。</span>
+                <span><b>v4.1 枠内強化:</b> 手ブレ警告を抑え、ガイド枠の内側の動きを優先して計測します。中央の線は表示しません。枠の中を指やボールで左右に横切ってください。</span>
             </li>
         </ul>
         <button id="close-modal" class="w-full mt-6 bg-[#ccff00] text-black font-black py-3 rounded-2xl uppercase text-xs">閉じる</button>
@@ -242,24 +245,28 @@
     const holdBadge = document.getElementById('hold-badge');
     const guideFrame = document.getElementById('guide-frame');
     const guideText = document.getElementById('guide-text');
+    const guideProgL = document.getElementById('guide-progress-left');
+    const guideProgR = document.getElementById('guide-progress-right');
     const distInput = document.getElementById('dist-input');
     const visibleFracSelect = document.getElementById('visible-frac');
     const ctx = canvas.getContext('2d');
 
-    // ---- CATCH MODE v4.0 -------------------------------------------------
-    // build: v4-prod
-    // 方針を単純化: 「中央バンドで X ピークが左右に移動したら計測」
-    // 複雑な手ブレ階層で軌道を消さない。全体揺れはスコアで減点するだけ。
+    // ---- FRAME FOCUS v4.1 -------------------------------------------------
+    // 手ブレ警告を緩め、ガイド枠内の横移動を優先して計測する。
+    // 中央の軌跡線は描かない（左右エッジの進捗のみ）。
     const AW = 240;
     const AH = 135;
-    const BAND_TOP = 0.28;      // 解析画像の縦バンド（ガイド枠相当）
-    const BAND_BOT = 0.72;
-    const MOTION_THR = 9;
+    // HTMLガイド枠と一致: 幅80%・高さ33%・中央
+    const FRAME_X0 = 0.10;
+    const FRAME_X1 = 0.90;
+    const FRAME_Y0 = 0.335;
+    const FRAME_Y1 = 0.665;
+    const MOTION_THR = 7;           // 枠内は敏感に
     const MIN_SPEED = 5;
     const MAX_SPEED = 200;
-    const WARMUP_MS = 200;
-    const TRACK_MAX_AGE = 1000;
-    const MIN_DX_RATIO = 0.04;   // 画面幅4%で確定候補
+    const WARMUP_MS = 160;
+    const TRACK_MAX_AGE = 1100;
+    const MIN_DX_RATIO = 0.035;
 
     let appState = 0;
     let maxSpeed = 0;
@@ -286,18 +293,18 @@
             statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
             holdBadge.classList.add('hidden');
             guideFrame.style.borderColor = 'rgba(204, 255, 0, 0.4)';
-            guideText.innerText = '枠の中を指やボールで左右に横切ってください';
+            guideText.innerText = '枠の中を左右に横切る';
             speedDisplay.innerText = '---';
         } else if (state === 1) {
             mainBtn.innerText = 'スキャン中...';
             mainBtn.disabled = true;
             mainBtn.style.opacity = '0.5';
             stopBtn.classList.remove('hidden');
-            statusBadge.innerText = 'SWIPE ACROSS FRAME';
+            statusBadge.innerText = '枠内を待機中';
             statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-red-500 border border-red-500/20 animate-pulse';
             holdBadge.classList.add('hidden');
             guideFrame.style.borderColor = '#ef4444';
-            guideText.innerText = '枠を左右に横切ってください（指OK）';
+            guideText.innerText = '枠の中を左右に横切る';
             resetScan();
             scanStart = performance.now();
             fired = false;
@@ -320,6 +327,10 @@
         lastPos = null;
         prevGray = null;
         frames = 0;
+        if (guideProgL && guideProgR) {
+            guideProgL.style.opacity = '0';
+            guideProgR.style.opacity = '0';
+        }
     }
 
     function syncSize() {
@@ -395,49 +406,42 @@
     }
 
     function drawHud() {
-        // motion trail / lock
+        // ロック点のみ（中央を横断する線・十字は描かない）
         if (lastPos) {
             const { x, y } = lastPos;
-            const r = Math.max(14, canvas.width * 0.018);
+            const r = Math.max(10, canvas.width * 0.014);
             ctx.save();
-            ctx.strokeStyle = '#ccff00';
+            ctx.fillStyle = 'rgba(204,255,0,0.22)';
+            ctx.beginPath();
+            ctx.arc(x, y, r * 1.8, 0, Math.PI * 2);
+            ctx.fill();
             ctx.fillStyle = 'rgba(204,255,0,0.95)';
-            ctx.lineWidth = Math.max(2, canvas.width * 0.004);
+            ctx.beginPath();
+            ctx.arc(x, y, r * 0.38, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(204,255,0,0.85)';
+            ctx.lineWidth = Math.max(2, canvas.width * 0.003);
             ctx.beginPath();
             ctx.arc(x, y, r, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(x, y, r * 0.35, 0, Math.PI * 2);
-            ctx.fill();
-            // trail
-            if (track.length > 1) {
-                ctx.beginPath();
-                ctx.strokeStyle = 'rgba(204,255,0,0.7)';
-                ctx.lineWidth = Math.max(2, canvas.width * 0.003);
-                for (let i = 0; i < track.length; i++) {
-                    const p = track[i];
-                    if (i === 0) ctx.moveTo(p.x, p.y);
-                    else ctx.lineTo(p.x, p.y);
-                }
-                ctx.stroke();
-            }
             ctx.restore();
         }
-        // progress bar = net dx so far
-        if (track.length >= 1) {
-            const dx = Math.abs(track[track.length - 1].x - track[0].x);
-            const need = Math.max(canvas.width * MIN_DX_RATIO, 24);
-            const fill = Math.min(1, dx / need);
-            const barW = canvas.width * 0.55;
-            const barH = Math.max(8, canvas.height * 0.012);
-            const x0 = (canvas.width - barW) / 2;
-            const y0 = canvas.height * 0.74;
-            ctx.save();
-            ctx.fillStyle = 'rgba(0,0,0,0.5)';
-            ctx.fillRect(x0, y0, barW, barH);
-            ctx.fillStyle = fill >= 1 ? '#ccff00' : '#22d3ee';
-            ctx.fillRect(x0, y0, barW * fill, barH);
-            ctx.restore();
+
+        // 進捗はガイド枠の左右エッジだけ
+        if (guideProgL && guideProgR) {
+            if (track.length >= 1) {
+                const dx = Math.abs(track[track.length - 1].x - track[0].x);
+                const need = Math.max(canvas.width * MIN_DX_RATIO, 22);
+                const fill = Math.min(1, dx / need);
+                const op = 0.25 + fill * 0.75;
+                guideProgL.style.opacity = String(op);
+                guideProgR.style.opacity = String(op);
+                guideProgL.style.boxShadow = fill >= 1 ? '0 0 10px #ccff00' : 'none';
+                guideProgR.style.boxShadow = fill >= 1 ? '0 0 10px #ccff00' : 'none';
+            } else {
+                guideProgL.style.opacity = '0';
+                guideProgR.style.opacity = '0';
+            }
         }
     }
 
@@ -450,9 +454,29 @@
         return g;
     }
 
+    function getGuideRoi() {
+        return {
+            x0: Math.floor(AW * FRAME_X0),
+            x1: Math.ceil(AW * FRAME_X1),
+            y0: Math.floor(AH * FRAME_Y0),
+            y1: Math.ceil(AH * FRAME_Y1)
+        };
+    }
+
+    function inGuideCanvas(x, y) {
+        const f = {
+            left: canvas.width * FRAME_X0,
+            right: canvas.width * FRAME_X1,
+            top: canvas.height * FRAME_Y0,
+            bottom: canvas.height * FRAME_Y1
+        };
+        const mx = canvas.width * 0.04;
+        const my = canvas.height * 0.04;
+        return x >= f.left - mx && x <= f.right + mx && y >= f.top - my && y <= f.bottom + my;
+    }
+
     /**
-     * 中央バンドの列エネルギーピークを返す。
-     * edgeRatio: 端の動き / 中央ピーク。大きいほど手ブレ寄り（減点材料）。
+     * ガイド枠内の列ピーク。手ブレでも枠内ピークがあれば返す（拒否しない）。
      */
     function samplePeak() {
         if (!analysisCtx) return null;
@@ -465,85 +489,58 @@
             return null;
         }
 
-        const y0 = Math.floor(AH * BAND_TOP);
-        const y1 = Math.floor(AH * BAND_BOT);
+        const roi = getGuideRoi();
         const col = new Float32Array(AW);
+        const colY = new Float32Array(AW);
+        const colYW = new Float32Array(AW);
         let motionPixels = 0;
-        let edgeMotion = 0;
-        let edgeN = 0;
 
-        for (let y = y0; y < y1; y++) {
+        for (let y = roi.y0; y < roi.y1; y++) {
             const row = y * AW;
-            for (let x = 0; x < AW; x++) {
+            for (let x = roi.x0; x < roi.x1; x++) {
                 const d = Math.abs(gray[row + x] - prevGray[row + x]);
                 if (d < MOTION_THR) continue;
                 const w = d * d;
                 col[x] += w;
+                colY[x] += y * w;
+                colYW[x] += w;
                 motionPixels++;
-                // 上下端帯（バンド外に近い）は手ブレ指標に使う
-            }
-        }
-
-        // 画面上下端の動き（手ブレ）
-        for (let y = 0; y < Math.floor(AH * 0.12); y++) {
-            const row = y * AW;
-            for (let x = 0; x < AW; x += 2) {
-                edgeMotion += Math.abs(gray[row + x] - prevGray[row + x]);
-                edgeN++;
-            }
-        }
-        for (let y = Math.floor(AH * 0.88); y < AH; y++) {
-            const row = y * AW;
-            for (let x = 0; x < AW; x += 2) {
-                edgeMotion += Math.abs(gray[row + x] - prevGray[row + x]);
-                edgeN++;
             }
         }
 
         prevGray = gray;
         frames++;
-
-        if (motionPixels < 3) return null;
+        if (motionPixels < 2) return null;
 
         let peakX = -1, peakE = 0, totalE = 0;
-        for (let x = 2; x < AW - 2; x++) {
+        for (let x = roi.x0; x < roi.x1; x++) {
             totalE += col[x];
             if (col[x] > peakE) { peakE = col[x]; peakX = x; }
         }
         if (peakX < 0 || peakE <= 0) return null;
 
-        // ピーク近傍で平滑
         let s = 0, sw = 0, sy = 0;
-        for (let x = Math.max(0, peakX - 8); x <= Math.min(AW - 1, peakX + 8); x++) {
+        for (let x = Math.max(roi.x0, peakX - 10); x <= Math.min(roi.x1 - 1, peakX + 10); x++) {
             const e = col[x];
             if (e <= 0) continue;
             s += x * e;
             sw += e;
+            if (colYW[x] > 0) sy += (colY[x] / colYW[x]) * e;
         }
-        // Y はバンド中央＋列内の重心近似
         const meanX = sw > 0 ? s / sw : peakX;
-        const meanY = (y0 + y1) / 2;
-
+        const meanY = sw > 0 ? sy / sw : (roi.y0 + roi.y1) / 2;
         const peakiness = peakE / (totalE + 1e-6);
-        const edgeAvg = edgeN > 0 ? edgeMotion / edgeN : 0;
-        // 中央ピークが端より優位か
-        const localStrength = peakE / (1 + edgeAvg * edgeAvg * 4);
-
-        // 完全な全面手ブレ（ピークが平坦＆端も激しい）だけ拒否
-        const isGlobalShake = peakiness < 0.04 && edgeAvg > 8 && motionPixels > (y1 - y0) * AW * 0.2;
-        if (isGlobalShake) return { shake: true, level: edgeAvg };
 
         const scaleX = canvas.width / AW;
         const scaleY = canvas.height / AH;
         return {
-            shake: false,
             x: meanX * scaleX,
             y: meanY * scaleY,
             t: performance.now(),
             energy: peakE,
             peakiness,
-            localStrength,
-            motionPixels
+            motionPixels,
+            inFrame: true
         };
     }
 
@@ -588,24 +585,17 @@
         const now = performance.now();
         const peak = samplePeak();
 
-        if (peak && peak.shake) {
-            // 全面手ブレ: 軌道は維持（消さない）。UIだけ注意
-            if (now - lastUi > 500) {
-                lastUi = now;
-                statusBadge.innerText = 'HOLD STILL…';
-                statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-orange-400 border border-orange-400/30';
-            }
-        } else if (peak) {
+        if (peak) {
             const prev = track.length ? track[track.length - 1] : null;
             let ok = true;
             if (prev) {
                 const dt = peak.t - prev.t;
                 const jump = Math.hypot(peak.x - prev.x, peak.y - prev.y);
                 if (dt < 5) ok = false;
-                if (jump > canvas.width * 0.7) ok = false;
+                if (jump > canvas.width * 0.75) ok = false;
             }
-            // 弱い全体ノイズより局所が強いとき優先して採用
-            if (ok && (peak.localStrength > 0.15 || peak.peakiness > 0.06 || peak.motionPixels < 600)) {
+            // 枠内ピークは基本すべて採用（手ブレで落としすぎない）
+            if (ok) {
                 track.push({
                     x: peak.x,
                     y: peak.y,
@@ -614,25 +604,28 @@
                     p: peak.peakiness
                 });
                 lastPos = { x: peak.x, y: peak.y };
-                if (now - lastUi > 80) {
+                if (now - lastUi > 90) {
                     lastUi = now;
                     const st = netStats(track);
-                    const dx = st ? Math.round(st.dx) : 0;
-                    statusBadge.innerText = 'TRACK n=' + track.length + ' dx=' + dx;
+                    const pct = st ? Math.min(100, Math.round((st.dx / Math.max(canvas.width * MIN_DX_RATIO, 22)) * 100)) : 0;
+                    statusBadge.innerText = pct >= 100 ? '計測可能' : ('枠内追跡 ' + pct + '%');
                     statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-[#ccff00] border border-[#ccff00]/40';
                     guideFrame.style.borderColor = '#ccff00';
-                    guideText.innerText = '追跡中…そのまま枠を横切ってください';
+                    guideText.innerText = pct >= 100 ? '離して確定…' : '枠内を追跡中';
                 }
             }
         }
 
-        // age out
         track = track.filter(p => now - p.t < TRACK_MAX_AGE);
         if (!track.length) {
             lastPos = null;
-            if (now - scanStart > WARMUP_MS && now - lastUi > 600) {
-                statusBadge.innerText = 'SWIPE ACROSS FRAME';
-                guideText.innerText = '枠を左右に横切ってください（指OK）';
+            if (guideProgL && guideProgR) {
+                guideProgL.style.opacity = '0';
+                guideProgR.style.opacity = '0';
+            }
+            if (now - scanStart > WARMUP_MS && now - lastUi > 700) {
+                statusBadge.innerText = '枠内を待機中';
+                guideText.innerText = '枠の中を左右に横切る';
                 guideFrame.style.borderColor = '#ef4444';
             }
         }
@@ -646,31 +639,32 @@
         const st = netStats(pts);
         if (!st) return;
 
-        const need = Math.max(canvas.width * MIN_DX_RATIO, 24);
-        // コア条件: 十分な水平移動
-        if (st.dx < need) return;
-        if (st.dx < st.dy * 0.5) return; // 縦揺れだけは除外
-        if (st.dt < 0.01 || st.dt > 1.5) return;
+        // 枠内点の比率で枠内計測を強化
+        const inCount = pts.filter(p => inGuideCanvas(p.x, p.y)).length;
+        if (inCount < Math.max(1, Math.ceil(pts.length * 0.5))) return;
 
-        // 緩い品質ゲート（2点の大きなスワイプはほぼ通す）
-        if (pts.length >= 3) {
-            if (st.lin < 0.28) return;
-            if (st.dir < 0.4) return;
-        }
+        const need = Math.max(canvas.width * MIN_DX_RATIO, 22);
+        if (st.dx < need) return;
+        if (st.dx < st.dy * 0.4) return;
+        if (st.dt < 0.01 || st.dt > 1.6) return;
+
+        // 手ブレ由来の往復は弱く見るが、厳しすぎない
+        if (pts.length >= 4 && st.dir < 0.35) return;
+        if (pts.length >= 4 && st.lin < 0.22) return;
 
         let kmh = toKmh(st.dist, st.dt);
         if (!isFinite(kmh)) return;
-        // 指テストでも値が消えないようクランプ表示（異常のみ除外）
-        if (kmh < MIN_SPEED) {
-            // 近距離の遅いスワイプは下限付近に丸めず棄却しすぎない
-            if (kmh < 2) return;
-            kmh = MIN_SPEED;
-        }
+        if (kmh < 2) return;
+        if (kmh < MIN_SPEED) kmh = MIN_SPEED;
         if (kmh > MAX_SPEED) kmh = MAX_SPEED;
 
         fired = true;
         track = [];
         lastPos = null;
+        if (guideProgL && guideProgR) {
+            guideProgL.style.opacity = '0';
+            guideProgR.style.opacity = '0';
+        }
         onHit(Math.round(kmh * 10) / 10);
     }
 
@@ -707,6 +701,7 @@
         samplePeak,
         tryFire,
         netStats,
+        inGuideCanvas,
         get track() { return track; },
         get frames() { return frames; },
         setTestCanvas(w, h) { canvas.width = w; canvas.height = h; }
