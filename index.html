@@ -4,10 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>AIスピードガン プロ - PRECISION FRAME v4.2</title>
-    
+    <meta name="description" content="カメラ映像から投球・指先スワイプ速度を計測する高精度スピードガン">
+    <meta name="theme-color" content="#0F172A">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="AIスピードガン">
+    <meta name="apple-mobile-web-app-title" content="Speed Gun">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
     
@@ -181,10 +187,16 @@
 
         <!-- 下部：操作エリア -->
         <div class="flex flex-col items-center gap-3 mb-2">
-            <button id="tip-btn" class="interactive bg-white/10 hover:bg-white/20 px-4 py-1.5 rounded-full flex items-center gap-2 border border-white/10">
-                <span class="bg-[#ccff00] text-black text-[9px] px-1 rounded font-black">TIP</span>
-                <span class="text-[10px] font-bold text-white/80">うまく測るコツ</span>
-            </button>
+            <div class="flex flex-wrap items-center justify-center gap-2">
+                <button id="tip-btn" class="interactive bg-white/10 hover:bg-white/20 px-4 py-1.5 rounded-full flex items-center gap-2 border border-white/10">
+                    <span class="bg-[#ccff00] text-black text-[9px] px-1 rounded font-black">TIP</span>
+                    <span class="text-[10px] font-bold text-white/80">うまく測るコツ</span>
+                </button>
+                <button id="install-btn" class="interactive hidden bg-[#ccff00]/15 hover:bg-[#ccff00]/25 px-4 py-1.5 rounded-full flex items-center gap-2 border border-[#ccff00]/40">
+                    <span class="bg-[#ccff00] text-black text-[9px] px-1 rounded font-black">APP</span>
+                    <span class="text-[10px] font-bold text-[#ccff00]">ホーム画面に追加</span>
+                </button>
+            </div>
 
             <div id="status-badge" class="bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20">READY FOR SCAN</div>
             
@@ -229,8 +241,28 @@
                 <span class="text-[#ccff00]">06</span>
                 <span><b>v4.2 精密通過:</b> 枠を通らない微動には反応しません。ガイド枠を左から右（または右から左）へしっかり横切ったときだけ計測します。スマホはできるだけ固定を。</span>
             </li>
+            <li class="flex gap-3">
+                <span class="text-[#ccff00]">07</span>
+                <span><b>ホーム画面に追加:</b> Android は「ホーム画面に追加」ボタン。iPhone は Safari の共有 →「ホーム画面に追加」でアプリのように使えます。</span>
+            </li>
         </ul>
         <button id="close-modal" class="w-full mt-6 bg-[#ccff00] text-black font-black py-3 rounded-2xl uppercase text-xs">閉じる</button>
+    </div>
+</div>
+
+<!-- iOS インストール案内 -->
+<div id="install-modal" class="modal-bg">
+    <div class="bg-slate-900 border border-white/10 rounded-3xl p-6 w-full max-w-sm">
+        <h2 class="text-[#ccff00] font-black text-lg mb-3 italic">ホーム画面に追加</h2>
+        <p class="text-sm font-bold text-white/90 leading-relaxed mb-4">
+            iPhone / iPad では Safari から次の手順でインストールできます。
+        </p>
+        <ol class="space-y-3 text-sm font-bold text-white/90 list-decimal list-inside">
+            <li>画面下の <span class="text-[#ccff00]">共有</span> ボタンをタップ</li>
+            <li><span class="text-[#ccff00]">ホーム画面に追加</span> を選択</li>
+            <li><span class="text-[#ccff00]">追加</span> をタップ</li>
+        </ol>
+        <button id="close-install-modal" class="w-full mt-6 bg-[#ccff00] text-black font-black py-3 rounded-2xl uppercase text-xs">閉じる</button>
     </div>
 </div>
 
@@ -812,6 +844,64 @@
     window.onload = () => {
         document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
     };
+
+    // --- PWA: install + service worker ---
+    const installBtn = document.getElementById('install-btn');
+    const installModal = document.getElementById('install-modal');
+    let deferredInstallPrompt = null;
+
+    const isStandalone = () =>
+        window.matchMedia('(display-mode: standalone)').matches ||
+        window.navigator.standalone === true;
+
+    const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+    function showInstallAffordance() {
+        if (isStandalone()) {
+            installBtn.classList.add('hidden');
+            return;
+        }
+        // Android/Chrome: show when beforeinstallprompt fired, or always offer iOS tip
+        if (deferredInstallPrompt || isIos()) {
+            installBtn.classList.remove('hidden');
+        }
+    }
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredInstallPrompt = e;
+        showInstallAffordance();
+    });
+
+    window.addEventListener('appinstalled', () => {
+        deferredInstallPrompt = null;
+        installBtn.classList.add('hidden');
+    });
+
+    installBtn.onclick = async () => {
+        if (deferredInstallPrompt) {
+            deferredInstallPrompt.prompt();
+            try { await deferredInstallPrompt.userChoice; } catch (_) { /* ignore */ }
+            deferredInstallPrompt = null;
+            showInstallAffordance();
+            return;
+        }
+        if (isIos()) {
+            installModal.style.display = 'flex';
+        }
+    };
+    document.getElementById('close-install-modal').onclick = () => {
+        installModal.style.display = 'none';
+    };
+
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js').catch((err) => {
+                console.warn('SW register failed', err);
+            });
+        });
+    }
+    showInstallAffordance();
 
     window.__speedGun = {
         samplePeak,
