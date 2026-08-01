@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - CALM FRAME v4.5</title>
+    <title>AIスピードガン プロ - CALM FRAME v4.6</title>
     <meta name="description" content="カメラ映像から投球・指先スワイプ速度を計測する高精度スピードガン">
     <meta name="theme-color" content="#0F172A">
     <meta name="mobile-web-app-capable" content="yes">
@@ -136,7 +136,7 @@
                     </div>
                     <div class="leading-tight">
                         <h1 class="text-[10px] font-black italic text-white uppercase">AI SPEED ANALYZER</h1>
-                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CALM FRAME v4.5</p>
+                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CALM FRAME v4.6</p>
                     </div>
                 </div>
                 <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive w-full min-w-0 box-border">
@@ -234,11 +234,11 @@
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">05</span>
-                <span><b>白い壁:</b> 白一色の壁は手ブレで誤検知しやすいです。模様や色のある背景、またはスマホをしっかり固定してください。</span>
+                <span><b>白い壁:</b> v4.6 で誤計測を抑えています。それでも不安定なら、模様や色のある背景にするかスマホを固定してください。</span>
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">06</span>
-                <span><b>v4.5 枠内精密:</b> 画面に見えているガイド枠と検出範囲を一致させ、枠を横切ると計測します。速度は枠内軌道から精密に算出します。</span>
+                <span><b>v4.6 白壁ガード:</b> 白い壁など明るい一様背景では、わずかな手ブレで誤計測しないよう自動で厳しくします。枠をしっかり左右に横切ってください。</span>
             </li>
             <li class="flex gap-3">
                 <span class="text-[#ccff00]">07</span>
@@ -281,9 +281,9 @@
     const visibleFracSelect = document.getElementById('visible-frac');
     const ctx = canvas.getContext('2d');
 
-    // ---- CALM FRAME v4.5 --------------------------------------------------
-    // 手ブレ時の静穏UIは維持。表示中のカバー領域＝ガイド枠に検出を一致させ、
-    // 出現ピークで枠内横断を確実に計測する。
+    // ---- CALM FRAME v4.6 --------------------------------------------------
+    // 表示ガイド一致＋出現ピーク計測。白い壁など明るい平坦背景では
+    // 自動で厳しくし、わずかな移動での誤計測を抑える。
     const AW = 320;
     const AH = 180;
     const FRAME_X0 = 0.10;   // = HTML w-4/5（表示領域基準）
@@ -312,6 +312,9 @@
     const WARMUP_MS = 220;
     const TRACK_MAX_AGE = 1200;
     const UI_ACTIVATE_DX = 0.08;
+    // --- 白壁ガード ---
+    const WHITE_MEAN = 145;
+    const WHITE_STD = 32;
 
     let appState = 0;
     let maxSpeed = 0;
@@ -550,9 +553,35 @@
         }
 
         const roi = getGuideRoi();
-        const riseCol = new Float32Array(AW);
-        const riseY = new Float32Array(AW);
-        const riseYW = new Float32Array(AW);
+        const roiW = roi.x1 - roi.x0;
+        const roiH = roi.y1 - roi.y0;
+
+        // 背景の明るさ・平坦さを見て白壁モードを判定
+        let sumBg = 0, sumBg2 = 0, nBg = 0;
+        for (let y = roi.y0; y < roi.y1; y++) {
+            const row = y * AW;
+            for (let x = roi.x0; x < roi.x1; x++) {
+                const v = gray[row + x];
+                sumBg += v;
+                sumBg2 += v * v;
+                nBg++;
+            }
+        }
+        const meanBg = sumBg / Math.max(1, nBg);
+        const stdBg = Math.sqrt(Math.max(0, sumBg2 / Math.max(1, nBg) - meanBg * meanBg));
+        const whiteWall = meanBg >= WHITE_MEAN && stdBg <= WHITE_STD;
+        const brightScene = meanBg >= WHITE_MEAN - 15;
+
+        // 白壁では閾値を上げ、薄いカメラノイズ／微動を落とす
+        const thr = whiteWall ? 26 : (brightScene ? 18 : MOTION_THR);
+        const minPeakiness = whiteWall ? 0.18 : MIN_RISE_PEAKINESS;
+        const minEnergy = whiteWall ? 360 : MIN_RISE_ENERGY;
+        const maxRoiFrac = whiteWall ? 0.09 : SHAKE_ROI_FRAC;
+        const maxMotion = whiteWall ? 420 : MAX_MOTION_PIXELS;
+
+        const objCol = new Float32Array(AW);
+        const objY = new Float32Array(AW);
+        const objYW = new Float32Array(AW);
         let motionPixels = 0;
         let sumY2 = 0, sumY = 0, sumW = 0;
 
@@ -562,50 +591,70 @@
                 const now = gray[row + x];
                 const prev = prevGray[row + x];
                 const d = Math.abs(now - prev);
-                if (d < MOTION_THR) continue;
+                if (d < thr) continue;
                 motionPixels++;
                 sumW += d;
                 sumY += y * d;
                 sumY2 += y * y * d;
 
-                // 出現側だけを物体位置に使う（残像でピークが割れない）
-                if (now <= prev) continue;
-                const bright = now > 100 ? 1.3 : (now > 70 ? 1.1 : 1.0);
-                const w = d * d * bright;
-                riseCol[x] += w;
-                riseY[x] += y * w;
-                riseYW[x] += w;
+                let boost;
+                if (whiteWall || brightScene) {
+                    // 白壁: 背景と差がある画素だけ（暗い指も明るい球も）。壁ノイズは捨てる
+                    const contrast = Math.abs(now - meanBg);
+                    if (contrast < (whiteWall ? 16 : 12)) continue;
+                    boost = contrast > 40 ? 1.55 : (contrast > 24 ? 1.25 : 0.7);
+                    // 現在コントラストがある側を優先（指が来た位置／球がある位置）
+                    boost *= (contrast >= Math.abs(prev - meanBg) ? 1.25 : 0.45);
+                } else {
+                    // 通常: 出現側のみ（残像分裂を防ぐ）
+                    if (now <= prev) continue;
+                    boost = now > 100 ? 1.3 : (now > 70 ? 1.1 : 1.0);
+                }
+                const w = d * d * boost;
+                objCol[x] += w;
+                objY[x] += y * w;
+                objYW[x] += w;
             }
         }
 
         prevGray = gray;
         frames++;
 
-        // 手ブレ: 広く動いた／縦に散った場合は無視（UIは静穏）
-        const roiW = roi.x1 - roi.x0;
-        const roiH = roi.y1 - roi.y0;
-        if (motionPixels < MIN_MOTION_PIXELS || motionPixels > MAX_MOTION_PIXELS) return null;
-        if (motionPixels > roiW * roiH * SHAKE_ROI_FRAC) return null;
+        // 手ブレ / 白壁シマー: 広く動いた／縦に散った／列が多すぎる
+        if (motionPixels < MIN_MOTION_PIXELS || motionPixels > maxMotion) return null;
+        if (motionPixels > roiW * roiH * maxRoiFrac) return null;
         if (sumW > 0) {
             const meanY0 = sumY / sumW;
             const spreadY = Math.sqrt(Math.max(0, sumY2 / sumW - meanY0 * meanY0));
-            if (spreadY > roiH * SHAKE_SPREAD_Y) return null;
+            const spreadLim = whiteWall ? SHAKE_SPREAD_Y * 0.78 : SHAKE_SPREAD_Y;
+            if (spreadY > roiH * spreadLim) return null;
         }
+        let activeCols = 0;
+        for (let x = roi.x0; x < roi.x1; x++) if (objCol[x] > 0) activeCols++;
+        // 白壁で多くの列が同時に微反応＝シマー（物体ではない）
+        if (whiteWall && activeCols > roiW * 0.28) return null;
 
-        let peakX = -1, peakE = 0, totalRise = 0;
+        let peakX = -1, peakE = 0, totalObj = 0;
         for (let x = roi.x0; x < roi.x1; x++) {
-            totalRise += riseCol[x];
-            if (riseCol[x] > peakE) { peakE = riseCol[x]; peakX = x; }
+            totalObj += objCol[x];
+            if (objCol[x] > peakE) { peakE = objCol[x]; peakX = x; }
         }
-        if (peakX < 0 || peakE < MIN_RISE_ENERGY || totalRise <= 0) return null;
+        if (peakX < 0 || peakE < minEnergy || totalObj <= 0) return null;
 
-        const peakiness = peakE / (totalRise + 1e-6);
-        if (peakiness < MIN_RISE_PEAKINESS) return null;
+        const peakiness = peakE / (totalObj + 1e-6);
+        if (peakiness < minPeakiness) return null;
+
+        // ピーク近傍幅: 白壁では狭く尖っていること
+        let halfW = 0;
+        const halfThr = peakE * 0.35;
+        for (let x = peakX; x >= roi.x0 && objCol[x] >= halfThr; x--) halfW++;
+        for (let x = peakX + 1; x < roi.x1 && objCol[x] >= halfThr; x++) halfW++;
+        if (whiteWall && halfW > Math.max(14, roiW * 0.12)) return null;
 
         // サブピクセル峰值＋近傍重心
         let peakXf = peakX;
         if (peakX > roi.x0 && peakX < roi.x1 - 1) {
-            const ym1 = riseCol[peakX - 1], y0 = riseCol[peakX], yp1 = riseCol[peakX + 1];
+            const ym1 = objCol[peakX - 1], y0 = objCol[peakX], yp1 = objCol[peakX + 1];
             const denom = (ym1 - 2 * y0 + yp1);
             if (Math.abs(denom) > 1e-6) {
                 const delta = 0.5 * (ym1 - yp1) / denom;
@@ -615,11 +664,11 @@
 
         let s = 0, sw = 0, sy = 0;
         for (let x = Math.max(roi.x0, Math.floor(peakXf) - 5); x <= Math.min(roi.x1 - 1, Math.ceil(peakXf) + 5); x++) {
-            const e = riseCol[x];
+            const e = objCol[x];
             if (e <= 0) continue;
             s += x * e;
             sw += e;
-            if (riseYW[x] > 0) sy += (riseY[x] / riseYW[x]) * e;
+            if (objYW[x] > 0) sy += (objY[x] / objYW[x]) * e;
         }
         const meanX = sw > 0 ? (0.6 * peakXf + 0.4 * (s / sw)) : peakXf;
         const meanY = sw > 0 ? sy / sw : (roi.y0 + roi.y1) * 0.5;
@@ -635,7 +684,8 @@
             t: performance.now(),
             energy: peakE,
             peakiness,
-            motionPixels
+            motionPixels,
+            whiteWall
         };
     }
 
@@ -784,7 +834,8 @@
                     y: peak.y,
                     t: peak.t,
                     e: peak.energy,
-                    p: peak.peakiness
+                    p: peak.peakiness,
+                    ww: peak.whiteWall ? 1 : 0
                 });
             }
         }
@@ -819,13 +870,22 @@
         const st = netStats(use);
         if (!st) return;
 
-        const need = Math.max(guideWidthPx() * MIN_GUIDE_SPAN, viewCrop.w * MIN_DX_RATIO);
+        // 白壁軌道は、より長い横断・直線性・方向一致を要求
+        const whiteHits = use.reduce((n, p) => n + (p.ww ? 1 : 0), 0);
+        const whiteMode = whiteHits >= Math.ceil(use.length * 0.5);
+        const spanNeed = whiteMode ? MIN_GUIDE_SPAN * 1.45 : MIN_GUIDE_SPAN;
+        const linNeed = whiteMode ? Math.max(MIN_LINEARITY, 0.62) : MIN_LINEARITY;
+        const dirNeed = whiteMode ? Math.max(MIN_DIR, 0.72) : MIN_DIR;
+        const minPts = whiteMode ? Math.max(MIN_POINTS, 4) : MIN_POINTS;
+        if (use.length < minPts && cleaned.length < minPts) return;
+
+        const need = Math.max(guideWidthPx() * spanNeed, viewCrop.w * (whiteMode ? MIN_DX_RATIO * 1.35 : MIN_DX_RATIO));
         if (st.dx < need) return;
-        if (st.dx < st.dy * 0.55) return;
+        if (st.dx < st.dy * (whiteMode ? 1.0 : 0.55)) return;
         if (st.dt < 0.015 || st.dt > 1.4) return;
-        if (st.lin < MIN_LINEARITY) return;
-        if (st.dir < MIN_DIR) return;
-        if (st.horizRatio < 0.38) return;
+        if (st.lin < linNeed) return;
+        if (st.dir < dirNeed) return;
+        if (st.horizRatio < (whiteMode ? 0.55 : 0.38)) return;
 
         let kmh = toKmhFromSpeed(st.speed);
         const endpoint = toKmhFromSpeed(st.dist / st.dt);
