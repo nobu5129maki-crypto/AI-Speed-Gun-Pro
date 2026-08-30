@@ -413,7 +413,7 @@
     let frames = 0;
     let lastUi = 0;
     let viewCrop = { x: 0, y: 0, w: 1, h: 1 };
-    let frameStampMs = 0; // requestVideoFrameCallback の mediaTime 優先
+    let frameStampMs = 0; // RVFC / rAF のフレーム提示時刻
 
     function setAppState(state) {
         appState = state;

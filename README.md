@@ -1,24 +1,13 @@
 <div align="center">
-  <img src="speed-gun-icon.svg" width="200" alt="AIスピードガン ロゴ">
+  <img src="speed-gun-icon.svg" width="160" alt="AIスピードガン ロゴ">
   <h1>AI SPEED GUN PRO</h1>
-  <p>本番: <a href="https://ai-speed-gun-pro.vercel.app">ai-speed-gun-pro.vercel.app</a></p>
+  <p><b>PRO FIELD v5.0</b> — スマホで高精度に球速を測るスピードガン</p>
 </div>
 
-## 自動アップロード（GitHub / Vercel）
+## 使い方
+1. https://ai-speed-gun-pro.vercel.app を開く（ホーム画面追加推奨）
+2. 距離・画角を設定
+3. 計測スタート → ガイド枠を左右に横切る
 
-このリポジトリは **変更のたびに GitHub へ push し、`main` 経由で Vercel 本番へ反映** する運用です。
-
-| 経路 | 内容 |
-|------|------|
-| GitHub | 作業ブランチ + `main` に push |
-| Vercel | `main` push で Production 自動デプロイ（GitHub Integration） |
-| CI | `.github/workflows/ci.yml` がテスト＋本番デプロイ確認 |
-| エージェント | `.cursor/rules/auto-deploy.mdc` が都度アップロードを強制 |
-
-### 手動で一括 ship
-
-```bash
-bash scripts/ship.sh "変更内容のメッセージ"
-```
-
-これでコミット → ブランチ push → `main` push（Vercel 本番）まで行います。
+## デプロイ
+`bash scripts/ship.sh "メッセージ"` で GitHub + Vercel 本番へ反映
