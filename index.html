@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - CALM FRAME v4.7</title>
-    <meta name="description" content="カメラ映像から投球・指先スワイプ速度を計測する高精度スピードガン">
-    <meta name="theme-color" content="#0F172A">
+    <title>AIスピードガン プロ - PRO FIELD v5.0</title>
+    <meta name="description" content="スマホで高精度に球速を測る AI Speed Gun Pro">
+    <meta name="theme-color" content="#07140f">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -14,20 +14,34 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
 
     <script src="https://cdn.tailwindcss.com"></script>
     
     <style>
-        :root { --app-height: 100%; }
+        :root {
+            --app-height: 100%;
+            --lime: #c8f542;
+            --ink: #06110d;
+            --panel: rgba(8, 24, 18, 0.72);
+            --line: rgba(200, 245, 66, 0.22);
+            --soft: rgba(255, 255, 255, 0.72);
+        }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         body {
-            background-color: #000;
-            color: white;
-            overflow: hidden;
-            font-family: 'Helvetica Neue', Arial, sans-serif;
             margin: 0;
-            height: var(--app-height);
-            width: 100vw;
+            color: #fff;
+            overflow: hidden;
             position: fixed;
+            width: 100vw;
+            height: var(--app-height);
+            font-family: 'Manrope', sans-serif;
+            background:
+                radial-gradient(120% 80% at 50% -10%, rgba(200, 245, 66, 0.18), transparent 55%),
+                radial-gradient(90% 60% at 100% 100%, rgba(20, 80, 55, 0.45), transparent 50%),
+                linear-gradient(165deg, #040a08 0%, #0a1a14 48%, #06110d 100%);
         }
         #app-container {
             position: relative;
@@ -35,6 +49,16 @@
             height: 100%;
             display: flex;
             flex-direction: column;
+            isolation: isolate;
+        }
+        #app-container::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            pointer-events: none;
+            background:
+                linear-gradient(180deg, rgba(4, 10, 8, 0.55) 0%, transparent 22%, transparent 68%, rgba(4, 10, 8, 0.72) 100%);
         }
         video, canvas {
             position: absolute;
@@ -43,67 +67,162 @@
             height: 100%;
             object-fit: cover;
         }
-        
         .ui-layer {
             position: absolute;
             inset: 0;
             z-index: 10;
-            padding: calc(0.5rem + env(safe-area-inset-top)) 1rem calc(1.5rem + env(safe-area-inset-bottom)) 1rem;
+            padding: calc(0.65rem + env(safe-area-inset-top)) 1rem calc(1.25rem + env(safe-area-inset-bottom)) 1rem;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
             pointer-events: none;
-            box-sizing: border-box;
         }
         .interactive { pointer-events: auto; }
-        
-        .glass-panel {
-            background: rgba(15, 23, 42, 0.7);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 1rem;
+
+        .brand-mark {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: clamp(1.7rem, 7vw, 2.35rem);
+            letter-spacing: 0.04em;
+            line-height: 0.9;
+            color: #fff;
+            text-shadow: 0 2px 18px rgba(0,0,0,0.45);
+            animation: brandIn 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .brand-sub {
+            font-size: 0.65rem;
+            font-weight: 800;
+            letter-spacing: 0.28em;
+            color: var(--lime);
+            text-transform: uppercase;
+            opacity: 0.9;
+            animation: brandIn 0.85s 0.08s cubic-bezier(0.22, 1, 0.36, 1) both;
         }
 
-        .main-speed {
-            font-size: 2.5rem;
-            font-weight: 900;
-            color: #ccff00;
-            line-height: 1;
+        .glass-panel {
+            background: var(--panel);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid var(--line);
+            border-radius: 1.1rem;
+        }
+
+        .speed-hero {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: clamp(3.4rem, 16vw, 5rem);
+            line-height: 0.85;
+            color: var(--lime);
+            letter-spacing: 0.01em;
+            text-shadow: 0 0 28px rgba(200, 245, 66, 0.25);
+        }
+        .speed-hero.pop {
+            animation: speedPop 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .speed-unit {
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.18em;
+            color: rgba(255,255,255,0.55);
+            text-transform: uppercase;
         }
 
         .btn-primary {
-            background: #ffffff;
-            color: #000000;
-            font-weight: 900;
-            padding: 1.2rem 3.5rem;
+            background: #fff;
+            color: #06110d;
+            font-weight: 800;
+            padding: 1.05rem 2rem;
             border-radius: 9999px;
-            font-size: 1.1rem;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            text-transform: uppercase;
+            font-size: 0.95rem;
+            letter-spacing: 0.04em;
+            box-shadow: 0 12px 28px rgba(0,0,0,0.45);
+            transition: transform 0.2s ease, background 0.2s ease, opacity 0.2s ease;
+            border: none;
         }
-        .btn-reset { background: #ccff00; color: #000; }
-        .btn-stop { background: #ef4444; color: #fff; }
+        .btn-primary:active { transform: scale(0.98); }
+        .btn-reset { background: var(--lime); color: #06110d; }
+        .btn-stop { background: #e11d48; color: #fff; }
+
+        .guide-shell {
+            width: 80%;
+            height: 33.3%;
+            max-width: 560px;
+            border: 1.5px solid rgba(200, 245, 66, 0.38);
+            border-radius: 1.35rem;
+            position: relative;
+            overflow: hidden;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+            animation: guideBreathe 3.6s ease-in-out infinite;
+        }
+        .guide-shell::before,
+        .guide-shell::after {
+            content: '';
+            position: absolute;
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--lime);
+            opacity: 0.85;
+        }
+        .guide-shell::before { left: 10px; top: 10px; border-right: 0; border-bottom: 0; }
+        .guide-shell::after { right: 10px; bottom: 10px; border-left: 0; border-top: 0; }
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.45rem 0.85rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background: rgba(0,0,0,0.35);
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: rgba(255,255,255,0.82);
+        }
+
+        .settings-panel {
+            max-height: 0;
+            overflow: hidden;
+            opacity: 0;
+            transition: max-height 0.35s ease, opacity 0.25s ease, margin 0.25s ease;
+            margin-top: 0;
+        }
+        .settings-panel.open {
+            max-height: 240px;
+            opacity: 1;
+            margin-top: 0.55rem;
+        }
 
         .modal-bg {
             position: fixed;
             inset: 0;
-            background: rgba(0,0,0,0.85);
+            background: rgba(0,0,0,0.82);
             z-index: 50;
             display: none;
             align-items: center;
             justify-content: center;
-            padding: 2rem;
+            padding: 1.5rem;
             pointer-events: auto;
         }
 
-        /* 距離・撮影横幅（visible-frac）コントロール：タップしやすく */
         #dist-input::-webkit-outer-spin-button,
         #dist-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         #dist-input[type=number] { -moz-appearance: textfield; }
         #visible-frac { -webkit-appearance: none; appearance: none; }
 
+        @keyframes brandIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes speedPop {
+            0% { transform: scale(0.82); opacity: 0.35; filter: blur(2px); }
+            60% { transform: scale(1.06); opacity: 1; filter: blur(0); }
+            100% { transform: scale(1); }
+        }
+        @keyframes guideBreathe {
+            0%, 100% { border-color: rgba(200, 245, 66, 0.28); }
+            50% { border-color: rgba(200, 245, 66, 0.55); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .brand-mark, .brand-sub, .guide-shell, .speed-hero.pop { animation: none; }
+        }
     </style>
 </head>
 <body>
@@ -113,96 +232,87 @@
     <canvas id="canvas-output"></canvas>
     
     <!-- ガイドフレーム -->
-    <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-        <div id="guide-frame" class="w-4/5 h-1/3 border-2 border-dashed border-[#ccff00]/35 rounded-2xl relative overflow-hidden">
-            <!-- 枠内テキストは出さない。左右端のごく薄い進捗のみ -->
-            <div id="guide-progress-left" class="absolute left-0 top-0 bottom-0 w-0.5 bg-[#ccff00] opacity-0 transition-opacity duration-200"></div>
-            <div id="guide-progress-right" class="absolute right-0 top-0 bottom-0 w-0.5 bg-[#ccff00] opacity-0 transition-opacity duration-200"></div>
+    <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-[5]">
+        <div id="guide-frame" class="guide-shell">
+            <div id="guide-progress-left" class="absolute left-0 top-0 bottom-0 w-0.5 bg-[var(--lime)] opacity-0 transition-opacity duration-200"></div>
+            <div id="guide-progress-right" class="absolute right-0 top-0 bottom-0 w-0.5 bg-[var(--lime)] opacity-0 transition-opacity duration-200"></div>
         </div>
     </div>
     
     <div class="ui-layer">
-        <!-- 上部パネル -->
-        <div class="flex flex-col gap-2">
-            <div class="flex flex-col gap-2 px-1">
-                <div class="flex items-center gap-2">
-                    <div class="w-8 h-8 flex-shrink-0 drop-shadow-[0_0_8px_rgba(204,255,0,0.6)]">
-                        <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-                            <g transform="translate(5, 5) scale(0.9)">
-                                <path d="M70 45 C 50 45 30 50 0 35 C 15 50 35 60 70 55 Z" fill="#ccff00" opacity="0.8" />
-                                <circle cx="70" cy="50" r="14" fill="#fff" stroke="#ccff00" stroke-width="2" />
-                            </g>
-                        </svg>
-                    </div>
-                    <div class="leading-tight">
-                        <h1 class="text-[10px] font-black italic text-white uppercase">AI SPEED ANALYZER</h1>
-                        <p class="text-[5px] font-bold text-[#ccff00] tracking-[0.2em]">CALM FRAME v4.7</p>
+        <div class="flex flex-col gap-3">
+            <div class="flex items-start justify-between gap-3 px-0.5">
+                <div>
+                    <div class="brand-mark">SPEED GUN</div>
+                    <div class="brand-sub">Pro Field v5.0</div>
+                </div>
+                <button id="settings-toggle" class="chip interactive" aria-expanded="false" aria-controls="settings-panel">
+                    <span class="text-[var(--lime)] text-[10px] font-black">設定</span>
+                    <span>距離 / 画角</span>
+                </button>
+            </div>
+
+            <div id="settings-panel" class="settings-panel glass-panel px-3 py-3 interactive w-full">
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-2">
+                    <label for="dist-input" class="text-[11px] text-white/70 font-bold">ピッチャー〜打者</label>
+                    <div class="flex items-center gap-1">
+                        <input type="number" id="dist-input" value="18.44" step="0.01" aria-label="ピッチャーから打者までの距離（メートル）" class="bg-white/10 text-sm font-extrabold w-[4.75rem] py-1.5 px-2 text-center text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] min-h-[34px]">
+                        <span class="text-xs text-white/45 font-bold">m</span>
                     </div>
                 </div>
-                <div class="glass-panel px-3 py-2 flex flex-col gap-2 interactive w-full min-w-0 box-border">
-                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-h-[36px]">
-                        <label for="dist-input" class="text-[10px] text-gray-300 font-black">ピッチャー〜打者の距離</label>
-                        <div class="flex items-center gap-1">
-                            <input type="number" id="dist-input" value="18.44" step="0.01" aria-label="ピッチャーから打者までの距離（メートル）" class="bg-white/10 text-sm font-black w-20 py-1.5 px-2 text-center text-white outline-none rounded border border-white/20 focus:border-[#ccff00] min-h-[32px]">
-                            <span class="text-xs text-gray-400">m</span>
-                        </div>
-                    </div>
-                    <div class="flex flex-col gap-1 w-full min-w-0">
-                        <label for="visible-frac" class="text-[10px] text-gray-300 font-black leading-tight">画面の横幅＝現場では</label>
-                        <select id="visible-frac" title="球速換算に必須。横から撮ると画面上の横幅は現場の一部しか映していないので、百分率で教えます。" class="bg-white/10 text-[11px] font-black text-white outline-none rounded border border-white/20 focus:border-[#ccff00] py-2 px-2 w-full min-w-0 min-h-[40px] cursor-pointer box-border">
-                            <option value="1.0">ほぼ全幅（正面・全体が画面に入る）</option>
-                            <option value="0.5">約半分（画面幅＝距離の約50%）</option>
-                            <option value="0.33" selected>約3分の1（横から・標準）</option>
-                            <option value="0.25">約4分の1（アップ・狭く写す）</option>
-                        </select>
-                        <p class="text-[7px] text-gray-500 leading-snug">※球速計算に必要。画面上の横いっぱいが、距離の何割ぶんの幅かを選びます。</p>
-                    </div>
+                <div class="mt-2.5 flex flex-col gap-1">
+                    <label for="visible-frac" class="text-[11px] text-white/70 font-bold">画面の横幅＝現場では</label>
+                    <select id="visible-frac" title="球速換算に必須" class="bg-white/10 text-[12px] font-bold text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] py-2.5 px-2 w-full min-h-[42px]">
+                        <option value="1.0">ほぼ全幅（正面）</option>
+                        <option value="0.5">約半分</option>
+                        <option value="0.33" selected>約3分の1（横から・標準）</option>
+                        <option value="0.25">約4分の1（アップ）</option>
+                    </select>
                 </div>
             </div>
 
             <div class="flex gap-2">
-                <div class="glass-panel p-2 border-l-2 border-l-[#ccff00] flex-1">
+                <div class="glass-panel p-3 flex-1">
                     <div class="flex justify-between items-center mb-1">
-                        <span class="text-[8px] font-bold text-gray-400 uppercase">Current Speed</span>
-                        <span id="hold-badge" class="hidden text-[8px] bg-yellow-500 text-black px-1 rounded font-black">ANALYZED</span>
+                        <span class="text-[10px] font-bold text-white/45 tracking-wide">NOW</span>
+                        <span id="hold-badge" class="hidden text-[9px] bg-[var(--lime)] text-black px-1.5 py-0.5 rounded font-black">LOCK</span>
                     </div>
-                    <div class="flex items-baseline justify-center gap-1">
-                        <span id="speed-display" class="main-speed">---</span>
-                        <span class="text-[10px] font-black text-gray-400 italic">km/h</span>
+                    <div class="flex items-end gap-2">
+                        <span id="speed-display" class="speed-hero">---</span>
+                        <span class="speed-unit pb-1">km/h</span>
                     </div>
                 </div>
-                <div class="glass-panel p-2 border-l-2 border-l-red-500 flex-1">
+                <div class="glass-panel p-3 w-[34%] min-w-[6.5rem]">
                     <div class="flex justify-between items-center mb-1">
-                        <span class="text-[8px] font-bold text-gray-400 uppercase">Session Max</span>
-                        <button id="reset-max" class="text-[7px] font-bold text-gray-500 interactive uppercase">Clear</button>
+                        <span class="text-[10px] font-bold text-white/45 tracking-wide">MAX</span>
+                        <button id="reset-max" class="text-[9px] font-bold text-white/40 interactive uppercase">Clear</button>
                     </div>
-                    <div class="flex items-baseline justify-center gap-1">
-                        <span id="max-speed-display" class="main-speed text-white">---</span>
-                        <span class="text-[10px] font-black text-gray-400 italic">km/h</span>
+                    <div class="flex items-end gap-1">
+                        <span id="max-speed-display" class="font-['Bebas_Neue'] text-[2rem] leading-none text-white">---</span>
+                        <span class="text-[9px] font-bold text-white/40 pb-0.5">km/h</span>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- 下部：操作エリア -->
-        <div class="flex flex-col items-center gap-3 mb-2">
+        <div class="flex flex-col items-center gap-3 mb-1">
             <div class="flex flex-wrap items-center justify-center gap-2">
-                <button id="tip-btn" class="interactive bg-white/10 hover:bg-white/20 px-4 py-1.5 rounded-full flex items-center gap-2 border border-white/10">
-                    <span class="bg-[#ccff00] text-black text-[9px] px-1 rounded font-black">TIP</span>
-                    <span class="text-[10px] font-bold text-white/80">うまく測るコツ</span>
+                <button id="tip-btn" class="chip interactive">
+                    <span class="bg-[var(--lime)] text-black text-[9px] px-1 rounded font-black">TIP</span>
+                    <span>測るコツ</span>
                 </button>
-                <button id="install-btn" class="interactive hidden bg-[#ccff00]/15 hover:bg-[#ccff00]/25 px-4 py-1.5 rounded-full flex items-center gap-2 border border-[#ccff00]/40">
-                    <span class="bg-[#ccff00] text-black text-[9px] px-1 rounded font-black">APP</span>
-                    <span class="text-[10px] font-bold text-[#ccff00]">ホーム画面に追加</span>
+                <button id="install-btn" class="chip interactive hidden border-[rgba(200,245,66,0.35)] text-[var(--lime)]">
+                    <span class="bg-[var(--lime)] text-black text-[9px] px-1 rounded font-black">APP</span>
+                    <span>ホーム画面に追加</span>
                 </button>
             </div>
 
-            <div id="status-badge" class="bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20">READY FOR SCAN</div>
+            <div id="status-badge" class="bg-black/50 px-4 py-1.5 rounded-full text-[10px] font-extrabold tracking-[0.18em] text-[var(--lime)] border border-[rgba(200,245,66,0.25)]">準備完了</div>
             
             <div class="flex flex-col gap-2 w-full max-w-xs">
                 <div class="flex gap-2">
                     <button id="main-btn" class="btn-primary interactive flex-1">計測スタート</button>
-                    <button id="stop-btn" class="btn-primary btn-stop interactive hidden flex-1">解析中止</button>
+                    <button id="stop-btn" class="btn-primary btn-stop interactive hidden flex-1">中止</button>
                 </div>
             </div>
         </div>
@@ -211,57 +321,30 @@
 
 <!-- モダル -->
 <div id="tip-modal" class="modal-bg">
-    <div class="bg-slate-900 border border-white/10 rounded-3xl p-6 w-full max-w-sm">
-        <h2 class="text-[#ccff00] font-black text-lg mb-4 flex items-center gap-2 italic">
-            高精度計測のポイント
-        </h2>
-        <ul class="space-y-4 text-sm font-bold text-white/90">
-            <li class="flex gap-3">
-                <span class="text-[#ccff00]">01</span>
-                <span><b>距離設定:</b> 18.44mはプロ仕様。少年野球(16m等)は必ず変更。</span>
-            </li>
-            <li class="flex gap-3">
-                <span class="text-[#ccff00]">02</span>
-                <span><b>画面の横幅＝現場では:</b> 「距離」に対して、画面の横いっぱいがグラウンド上で何割の幅に当たるかです。正面でマウンド〜本塁が画面幅いっぱいなら「ほぼ全幅」。横からボールだけが狭く写るなら「約3分の1」など。ここが合っていないと球速が大きくずれます。</span>
-            </li>
-            <li class="flex gap-3">
-                <span class="text-[#ccff00]">03</span>
-                <span><b>スマホを固定:</b> 手ブレは背景をボールと誤認し、異常値の原因になります。</span>
-            </li>
-            <li class="flex gap-3">
-                <span class="text-[#ccff00]">04</span>
-                <span><b>背景の整理:</b> ボール以外の動く物があると誤検知します。</span>
-            </li>
-            <li class="flex gap-3">
-                <span class="text-[#ccff00]">05</span>
-                <span><b>白い壁:</b> v4.7 でさらに厳しくしています。白壁では枠の左端から右端までしっかり横切ったときだけ計測します。可能なら模様のある背景かスマホ固定を。</span>
-            </li>
-            <li class="flex gap-3">
-                <span class="text-[#ccff00]">06</span>
-                <span><b>v4.7 白壁ロック:</b> 白い壁では左右ゾーンの完全通過が必要です。わずかな移動や手ブレでは計測しません。</span>
-            </li>
-            <li class="flex gap-3">
-                <span class="text-[#ccff00]">07</span>
-                <span><b>ホーム画面に追加:</b> Android は「ホーム画面に追加」ボタン。iPhone は Safari の共有 →「ホーム画面に追加」でアプリのように使えます。</span>
-            </li>
+    <div class="bg-[#0b1a14] border border-[rgba(200,245,66,0.2)] rounded-3xl p-6 w-full max-w-sm">
+        <h2 class="font-['Bebas_Neue'] text-[1.8rem] text-[var(--lime)] tracking-wide mb-3">高精度のコツ</h2>
+        <ul class="space-y-3.5 text-sm font-bold text-white/90 leading-relaxed">
+            <li><span class="text-[var(--lime)]">01</span> 距離は現場に合わせる（プロ 18.44m / 少年は変更）</li>
+            <li><span class="text-[var(--lime)]">02</span> 「画面の横幅＝現場では」を正確に選ぶと球速が安定</li>
+            <li><span class="text-[var(--lime)]">03</span> スマホは固定。手ブレは誤検知の主因</li>
+            <li><span class="text-[var(--lime)]">04</span> ガイド枠を左→右（または右→左）へしっかり横切る</li>
+            <li><span class="text-[var(--lime)]">05</span> 白い壁は厳しめ。模様のある背景がより安定</li>
+            <li><span class="text-[var(--lime)]">06</span> ホーム画面追加でアプリのように起動可能</li>
         </ul>
-        <button id="close-modal" class="w-full mt-6 bg-[#ccff00] text-black font-black py-3 rounded-2xl uppercase text-xs">閉じる</button>
+        <button id="close-modal" class="w-full mt-6 bg-[var(--lime)] text-black font-black py-3 rounded-2xl text-xs tracking-wide">閉じる</button>
     </div>
 </div>
 
-<!-- iOS インストール案内 -->
 <div id="install-modal" class="modal-bg">
-    <div class="bg-slate-900 border border-white/10 rounded-3xl p-6 w-full max-w-sm">
-        <h2 class="text-[#ccff00] font-black text-lg mb-3 italic">ホーム画面に追加</h2>
-        <p class="text-sm font-bold text-white/90 leading-relaxed mb-4">
-            iPhone / iPad では Safari から次の手順でインストールできます。
-        </p>
-        <ol class="space-y-3 text-sm font-bold text-white/90 list-decimal list-inside">
-            <li>画面下の <span class="text-[#ccff00]">共有</span> ボタンをタップ</li>
-            <li><span class="text-[#ccff00]">ホーム画面に追加</span> を選択</li>
-            <li><span class="text-[#ccff00]">追加</span> をタップ</li>
+    <div class="bg-[#0b1a14] border border-[rgba(200,245,66,0.2)] rounded-3xl p-6 w-full max-w-sm">
+        <h2 class="font-['Bebas_Neue'] text-[1.8rem] text-[var(--lime)] tracking-wide mb-2">ホーム画面に追加</h2>
+        <p class="text-sm font-bold text-white/85 leading-relaxed mb-4">iPhone / iPad は Safari から追加できます。</p>
+        <ol class="space-y-2.5 text-sm font-bold text-white/90 list-decimal list-inside">
+            <li>画面下の <span class="text-[var(--lime)]">共有</span> をタップ</li>
+            <li><span class="text-[var(--lime)]">ホーム画面に追加</span> を選択</li>
+            <li><span class="text-[var(--lime)]">追加</span> をタップ</li>
         </ol>
-        <button id="close-install-modal" class="w-full mt-6 bg-[#ccff00] text-black font-black py-3 rounded-2xl uppercase text-xs">閉じる</button>
+        <button id="close-install-modal" class="w-full mt-6 bg-[var(--lime)] text-black font-black py-3 rounded-2xl text-xs tracking-wide">閉じる</button>
     </div>
 </div>
 
@@ -281,13 +364,13 @@
     const visibleFracSelect = document.getElementById('visible-frac');
     const ctx = canvas.getContext('2d');
 
-    // ---- CALM FRAME v4.7 --------------------------------------------------
-    // 白壁では左右ゾーン完全通過を必須にし、全体ずれ・微動による誤計測を強く抑止。
+    // ---- PRO FIELD v5.0 ---------------------------------------------------
+    // プロUI + 表示ガイド一致検出 + 白壁ロック + フレーム時刻で速度精密化。
     const AW = 320;
     const AH = 180;
-    const FRAME_X0 = 0.10;   // = HTML w-4/5（表示領域基準）
+    const FRAME_X0 = 0.10;   // = HTML guide 80%
     const FRAME_X1 = 0.90;
-    const FRAME_Y0 = 0.335;  // = HTML h-1/3
+    const FRAME_Y0 = 0.335;  // = HTML guide ~33%
     const FRAME_Y1 = 0.665;
     // --- 手ブレ系（広い揺れだけ弾く／UI反応は静穏のまま）---
     const MOTION_THR = 14;
@@ -295,7 +378,7 @@
     const MAX_MOTION_PIXELS = 780;
     const SHAKE_SPREAD_Y = 0.42;
     const SHAKE_ROI_FRAC = 0.20;
-    const GUIDE_BORDER = 'rgba(204, 255, 0, 0.35)';
+    const GUIDE_BORDER = 'rgba(200, 245, 66, 0.38)';
     // --- 枠内物体（出現ピーク）---
     const MIN_RISE_PEAKINESS = 0.08;
     const MIN_RISE_ENERGY = 160;
@@ -314,7 +397,8 @@
     // --- 白壁ロック（広めに判定＋厳しく計測）---
     const WHITE_MEAN = 130;
     const WHITE_STD = 48;
-    const WHITE_BRIGHT_MEAN = 165; // 十分明るければ std が大きくても白壁扱い
+    const WHITE_BRIGHT_MEAN = 165;
+    const SETTINGS_KEY = 'aispeedgun.pro.v5.settings';
 
     let appState = 0;
     let maxSpeed = 0;
@@ -328,7 +412,8 @@
     let lastPos = null;
     let frames = 0;
     let lastUi = 0;
-    let viewCrop = { x: 0, y: 0, w: 1, h: 1 }; // video-pixel crop shown on screen
+    let viewCrop = { x: 0, y: 0, w: 1, h: 1 };
+    let frameStampMs = 0; // requestVideoFrameCallback の mediaTime 優先
 
     function setAppState(state) {
         appState = state;
@@ -340,9 +425,10 @@
             mainBtn.style.opacity = '1';
             stopBtn.classList.add('hidden');
             statusBadge.innerText = '準備完了';
-            statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
+            statusBadge.className = 'bg-black/50 px-4 py-1.5 rounded-full text-[10px] font-extrabold tracking-[0.18em] text-[var(--lime)] border border-[rgba(200,245,66,0.25)]';
             holdBadge.classList.add('hidden');
             speedDisplay.innerText = '---';
+            speedDisplay.classList.remove('pop');
             clearProgress();
         } else if (state === 1) {
             mainBtn.innerText = '計測中...';
@@ -350,8 +436,10 @@
             mainBtn.style.opacity = '0.5';
             stopBtn.classList.remove('hidden');
             statusBadge.innerText = '計測中';
-            statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
+            statusBadge.className = 'bg-black/50 px-4 py-1.5 rounded-full text-[10px] font-extrabold tracking-[0.18em] text-white/80 border border-white/20';
             holdBadge.classList.add('hidden');
+            // 計測中は設定を閉じて視界を確保
+            closeSettings();
             resetScan();
             scanStart = performance.now();
             fired = false;
@@ -362,10 +450,42 @@
             mainBtn.classList.add('btn-reset');
             stopBtn.classList.add('hidden');
             statusBadge.innerText = '計測完了';
-            statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-yellow-500 border border-yellow-500/20';
+            statusBadge.className = 'bg-black/50 px-4 py-1.5 rounded-full text-[10px] font-extrabold tracking-[0.18em] text-[var(--lime)] border border-[rgba(200,245,66,0.35)]';
             holdBadge.classList.remove('hidden');
             clearProgress();
         }
+    }
+
+    function openSettings() {
+        const panel = document.getElementById('settings-panel');
+        const btn = document.getElementById('settings-toggle');
+        panel.classList.add('open');
+        btn.setAttribute('aria-expanded', 'true');
+    }
+    function closeSettings() {
+        const panel = document.getElementById('settings-panel');
+        const btn = document.getElementById('settings-toggle');
+        panel.classList.remove('open');
+        btn.setAttribute('aria-expanded', 'false');
+    }
+    function loadSettings() {
+        try {
+            const raw = localStorage.getItem(SETTINGS_KEY);
+            if (!raw) return;
+            const data = JSON.parse(raw);
+            if (data.dist != null && Number.isFinite(+data.dist)) distInput.value = String(data.dist);
+            if (data.vis != null && visibleFracSelect.querySelector(`option[value="${data.vis}"]`)) {
+                visibleFracSelect.value = String(data.vis);
+            }
+        } catch (_) { /* ignore */ }
+    }
+    function saveSettings() {
+        try {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+                dist: parseFloat(distInput.value) || 18.44,
+                vis: parseFloat(visibleFracSelect.value) || 0.33
+            }));
+        } catch (_) { /* ignore */ }
     }
 
     function clearProgress() {
@@ -400,9 +520,9 @@
             const stream = await navigator.mediaDevices.getUserMedia({
                 video: {
                     facingMode: { ideal: 'environment' },
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    frameRate: { ideal: 60, min: 15 }
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 },
+                    frameRate: { ideal: 60, min: 24 }
                 },
                 audio: false
             });
@@ -434,13 +554,16 @@
         loopOn = true;
         const useRvfc = typeof video.requestVideoFrameCallback === 'function';
         if (useRvfc) {
-            const tickRvfc = () => {
+            const tickRvfc = (now) => {
+                // RVFC の now はフレーム提示時刻（performance と同系）で間隔が正確
+                frameStampMs = now;
                 tick();
                 if (loopOn) video.requestVideoFrameCallback(tickRvfc);
             };
             video.requestVideoFrameCallback(tickRvfc);
         } else {
-            const tickRaf = () => {
+            const tickRaf = (now) => {
+                frameStampMs = now || performance.now();
                 tick();
                 if (loopOn) requestAnimationFrame(tickRaf);
             };
@@ -724,7 +847,7 @@
         return {
             x: cx,
             y: cy,
-            t: performance.now(),
+            t: frameStampMs || performance.now(),
             energy: peakE,
             peakiness,
             motionPixels,
@@ -919,7 +1042,7 @@
         if (now - lastUi > 500) {
             lastUi = now;
             statusBadge.innerText = '計測中';
-            statusBadge.className = 'bg-black/60 px-4 py-1 rounded-full text-[9px] font-black tracking-[0.2em] text-cyan-400 border border-cyan-400/20';
+            statusBadge.className = 'bg-black/50 px-4 py-1.5 rounded-full text-[10px] font-extrabold tracking-[0.18em] text-white/80 border border-white/20';
             if (!(track.length && prog >= UI_ACTIVATE_DX)) clearProgress();
         }
 
@@ -978,10 +1101,17 @@
 
     function onHit(speed) {
         if (appState !== 1) return;
+        speedDisplay.classList.remove('pop');
+        // reflow to retrigger animation
+        void speedDisplay.offsetWidth;
         speedDisplay.innerText = speed.toFixed(1);
+        speedDisplay.classList.add('pop');
         if (speed > maxSpeed) {
             maxSpeed = speed;
             maxSpeedDisplay.innerText = maxSpeed.toFixed(1);
+        }
+        if (navigator.vibrate) {
+            try { navigator.vibrate(28); } catch (_) { /* ignore */ }
         }
         setAppState(2);
     }
@@ -1001,9 +1131,20 @@
     document.getElementById('close-modal').onclick = () => {
         document.getElementById('tip-modal').style.display = 'none';
     };
+    document.getElementById('settings-toggle').onclick = () => {
+        const panel = document.getElementById('settings-panel');
+        if (panel.classList.contains('open')) closeSettings();
+        else openSettings();
+    };
+    distInput.addEventListener('change', saveSettings);
+    visibleFracSelect.addEventListener('change', saveSettings);
     window.onload = () => {
         document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+        loadSettings();
     };
+    window.addEventListener('resize', () => {
+        document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+    });
 
     // --- PWA: install + service worker ---
     const installBtn = document.getElementById('install-btn');

@@ -10,8 +10,8 @@
   "display": "standalone",
   "display_override": ["standalone", "fullscreen", "browser"],
   "orientation": "any",
-  "background_color": "#000000",
-  "theme_color": "#0F172A",
+  "theme_color": "#07140f",
+  "background_color": "#06110d",
   "categories": ["sports", "utilities"],
   "icons": [
     {
