@@ -1,187 +1,233 @@
-const AW=320,AH=180;
-const FRAME_X0=0.10,FRAME_X1=0.90,FRAME_Y0=0.335,FRAME_Y1=0.665;
-const MOTION_THR=14, MIN_MOTION_PIXELS=8, MAX_MOTION_PIXELS=780;
-const MIN_RISE_PEAKINESS=0.08, MIN_RISE_ENERGY=160;
-const SHAKE_SPREAD_Y=0.42, SHAKE_ROI_FRAC=0.20;
-const WHITE_MEAN=130, WHITE_STD=48, WHITE_BRIGHT_MEAN=165;
-const MIN_GUIDE_SPAN=0.18, ZONE_RATIO=0.12;
+// 検出コア（detector.js）の合成フレームテスト
+//   node test-cross-catch.mjs
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const Core = require('./detector.js');
 
-function gray(fill, draw){
-  const g=new Uint8Array(AW*AH);
-  g.fill(fill);
-  if(draw) draw(g);
-  return g;
-}
-function stamp(g,cx,cy,r,v){
-  for(let y=cy-r;y<=cy+r;y++) for(let x=cx-r;x<=cx+r;x++){
-    if(x<0||x>=AW||y<0||y>=AH) continue;
-    if((x-cx)**2+(y-cy)**2<=r*r) g[y*AW+x]=v;
-  }
-}
-function peak(prev,cur){
-  const x0=Math.floor(AW*FRAME_X0),x1=Math.ceil(AW*FRAME_X1);
-  const y0=Math.floor(AH*FRAME_Y0),y1=Math.ceil(AH*FRAME_Y1);
-  const roiW=x1-x0, roiH=y1-y0;
-  let sumBg=0,sumBg2=0,nBg=0;
-  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
-    const v=cur[y*AW+x]; sumBg+=v; sumBg2+=v*v; nBg++;
-  }
-  const meanBg=sumBg/Math.max(1,nBg);
-  const stdBg=Math.sqrt(Math.max(0,sumBg2/Math.max(1,nBg)-meanBg*meanBg));
-  const whiteWall=(meanBg>=WHITE_MEAN && stdBg<=WHITE_STD) || meanBg>=WHITE_BRIGHT_MEAN;
-  const brightScene=!whiteWall && meanBg>=WHITE_MEAN-10;
-  const thr=whiteWall?34:(brightScene?20:MOTION_THR);
-  const minPeakiness=whiteWall?0.10:MIN_RISE_PEAKINESS;
-  const minCompact=whiteWall?0.52:0;
-  const minEnergy=whiteWall?500:MIN_RISE_ENERGY;
-  const maxRoiFrac=whiteWall?0.055:SHAKE_ROI_FRAC;
-  const maxMotion=whiteWall?280:MAX_MOTION_PIXELS;
-  const minContrast=whiteWall?34:(brightScene?16:0);
+const AW = 480, AH = 270;
+const ROI = { x0: 0.10, x1: 0.90, y0: 0.335, y1: 0.665 };
+const FPS = 60;
+const DT = 1000 / FPS;
 
-  const obj=new Float32Array(AW);
-  let mp=0,sumY=0,sumY2=0,sumX=0,sumX2=0,sumW=0;
-  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
-    const now=cur[y*AW+x], pr=prev[y*AW+x];
-    const d=Math.abs(now-pr);
-    if(d<thr) continue;
-    mp++; sumW+=d; sumY+=y*d; sumY2+=y*y*d; sumX+=x*d; sumX2+=x*x*d;
-    let boost;
-    if(whiteWall||brightScene){
-      const contrast=Math.abs(now-meanBg);
-      if(contrast<minContrast) continue;
-      boost=contrast>55?1.7:(contrast>40?1.35:0.55);
-      boost*=(contrast>=Math.abs(pr-meanBg)+4?1.3:0.35);
-    } else {
-      if(now<=pr) continue;
-      boost=now>100?1.3:(now>70?1.1:1.0);
+let pass = 0, fail = 0;
+const A = (name, cond, detail = '') => {
+    if (cond) { pass++; console.log('✓', name); }
+    else { fail++; console.error('✗', name, detail); }
+};
+
+// ---- 合成フレーム生成 -------------------------------------------------------
+function makeNoiseBg(mean, amp, seed = 7) {
+    let s = seed;
+    const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    const g = new Uint8Array(AW * AH);
+    for (let i = 0; i < g.length; i++) g[i] = Math.max(0, Math.min(255, Math.round(mean + (rnd() - 0.5) * 2 * amp)));
+    return g;
+}
+function withSensorNoise(base, amp, seed) {
+    let s = seed;
+    const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+    const g = new Uint8Array(base.length);
+    for (let i = 0; i < g.length; i++) g[i] = Math.max(0, Math.min(255, Math.round(base[i] + (rnd() - 0.5) * 2 * amp)));
+    return g;
+}
+function drawCircle(g, cx, cy, r, v) {
+    for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
+        for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
+            if (x < 0 || x >= AW || y < 0 || y >= AH) continue;
+            if ((x - cx) ** 2 + (y - cy) ** 2 <= r * r) g[y * AW + x] = v;
+        }
     }
-    obj[x]+=d*d*boost;
-  }
-  let activeCols=0; for(let x=x0;x<x1;x++) if(obj[x]>0) activeCols++;
-  if(mp<MIN_MOTION_PIXELS||mp>maxMotion) return null;
-  if(mp>roiW*roiH*maxRoiFrac) return null;
-  if(sumW>0){
-    const my=sumY/sumW, mx=sumX/sumW;
-    const sy=Math.sqrt(Math.max(0,sumY2/sumW-my*my));
-    const sx=Math.sqrt(Math.max(0,sumX2/sumW-mx*mx));
-    const lim=whiteWall?SHAKE_SPREAD_Y*0.55:SHAKE_SPREAD_Y;
-    if(sy>roiH*lim) return null;
-    if(whiteWall && sx>roiW*0.22) return null;
-  }
-  if(whiteWall && activeCols>Math.max(6,roiW*0.14)) return null;
-  let peakX=-1,peakE=0,total=0;
-  for(let x=x0;x<x1;x++){ total+=obj[x]; if(obj[x]>peakE){peakE=obj[x];peakX=x;} }
-  if(peakE<minEnergy||total<=0) return null;
-  if(peakE/(total+1e-6)<minPeakiness) return null;
-  if(whiteWall && minCompact>0){
-    let near=0;
-    for(let x=Math.max(x0,peakX-4); x<=Math.min(x1-1,peakX+4); x++) near+=obj[x];
-    if(near/(total+1e-6)<minCompact) return null;
-  }
-  let sideCols=0; const sideThr=peakE*0.12;
-  for(let x=x0;x<x1;x++){ if(Math.abs(x-peakX)<=6) continue; if(obj[x]>=sideThr) sideCols++; }
-  if(whiteWall && sideCols>=3) return null;
-  let halfW=0; const halfThr=peakE*0.40;
-  for(let x=peakX;x>=x0 && obj[x]>=halfThr;x--) halfW++;
-  for(let x=peakX+1;x<x1 && obj[x]>=halfThr;x++) halfW++;
-  if(whiteWall && halfW>Math.max(14,roiW*0.10)) return null;
-  return {x:peakX,y:(y0+y1)/2,whiteWall};
 }
-function crosses(pts, forceBoth=false){
-  const left=AW*FRAME_X0,right=AW*FRAME_X1,w=right-left;
-  const zL=left+w*ZONE_RATIO,zR=right-w*ZONE_RATIO;
-  let L=false,R=false;
-  for(const p of pts){ if(p.x<=zL)L=true; if(p.x>=zR)R=true; }
-  if(L&&R) return true;
-  if(forceBoth) return false;
-  return Math.abs(pts.at(-1).x-pts[0].x)>=w*MIN_GUIDE_SPAN;
-}
-function shouldFire(pts, whiteMode=false){
-  if(pts.length<(whiteMode?5:3)) return false;
-  if(!crosses(pts, whiteMode)) return false;
-  const span=whiteMode?0.42:MIN_GUIDE_SPAN;
-  const dx=Math.abs(pts.at(-1).x-pts[0].x);
-  return dx>=AW*(FRAME_X1-FRAME_X0)*span;
-}
-let p=0,f=0; const A=(n,c,d='')=>{if(c){p++;console.log('✓',n);}else{f++;console.error('✗',n,d);}};
-
-{
-  const xs=[40,70,100,130,160,190,220,250,270];
-  const track=[]; let prev=gray(48); let t=0;
-  for(const cx of xs){
-    const cur=gray(48,g=>stamp(g,cx,Math.floor(AH*0.5),5,230));
-    const pk=peak(prev,cur); prev=cur; t+=33; if(pk) track.push({...pk,t});
-  }
-  A('full in-frame cross fires', shouldFire(track), 'n='+track.length);
-}
-{
-  const xs=[50,90,130,170,210,250];
-  const track=[]; let prev=gray(48); let t=0;
-  for(const cx of xs){
-    const cur=gray(48,g=>stamp(g,cx,Math.floor(AH*0.5),3,95));
-    const pk=peak(prev,cur); prev=cur; t+=33; if(pk) track.push({...pk,t});
-  }
-  A('dim fingertip-like cross fires', shouldFire(track), 'n='+track.length);
-}
-{
-  // dark finger full cross on white wall — both zones
-  const xs=[40,70,100,130,160,190,220,250,275];
-  const track=[]; let prev=gray(210); let t=0;
-  for(const cx of xs){
-    const cur=gray(210,g=>stamp(g,cx,Math.floor(AH*0.5),5,55));
-    const pk=peak(prev,cur); prev=cur; t+=33; if(pk) track.push({...pk,t,ww:1});
-  }
-  A('white-wall full cross fires', shouldFire(track,true), 'n='+track.length);
-}
-{
-  // white wall short drift must NOT fire even with several points
-  const track=[];
-  for(let i=0;i<8;i++) track.push({x:140+i*6, y:90, t:1000+i*33, ww:1});
-  A('white-wall short drift rejected', !shouldFire(track,true));
-}
-{
-  let prev=gray(210); let hits=0;
-  for(let i=0;i<6;i++){
-    const cur=gray(210,g=>{
-      for(let y=Math.floor(AH*FRAME_Y0); y<Math.ceil(AH*FRAME_Y1); y++)
-        for(let x=Math.floor(AW*FRAME_X0); x<Math.ceil(AW*FRAME_X1); x++)
-          g[y*AW+x]=210+((x+y+i)%5===0?14:((x*3+y+i)%7===0?9:0));
-    });
-    if(peak(prev,cur)) hits++;
-    prev=cur;
-  }
-  A('white-wall micro shimmer rejected', hits===0, 'hits='+hits);
-}
-{
-  // camera global shift on white: almost whole ROI shifts a bit
-  let prev=gray(200);
-  const cur=gray(200,g=>{
-    for(let y=0;y<AH;y++) for(let x=0;x<AW;x++){
-      const sx=Math.max(0,Math.min(AW-1,x-2));
-      g[y*AW+x]=prev[y*AW+sx];
+function drawRect(g, x0, y0, w, h, v) {
+    for (let y = Math.max(0, Math.floor(y0)); y < Math.min(AH, y0 + h); y++) {
+        for (let x = Math.max(0, Math.floor(x0)); x < Math.min(AW, x0 + w); x++) g[y * AW + x] = v;
     }
-    // mild brightness flicker
-    for(let i=0;i<g.length;i++) g[i]=Math.min(255,g[i]+((i%11===0)?6:0));
-  });
-  A('white-wall global shift rejected', peak(prev,cur)==null);
 }
-{
-  const track=[];
-  for(let i=0;i<8;i++) track.push({x:160+Math.sin(i)*2, y:90, t:1000+i*33});
-  A('tiny jitter rejected', !shouldFire(track));
-}
-{
-  let prev=gray(48); let hits=0;
-  for(const cx of [50,120,200]){
-    const cur=gray(48,g=>stamp(g,cx,12,4,230));
-    if(peak(prev,cur)) hits++; prev=cur;
-  }
-  A('outside frame ignored', hits===0, 'hits='+hits);
-}
-{
-  let prev=gray(48);
-  const cur=gray(49);
-  A('weak flat motion no peak', peak(prev,cur)==null);
+function shiftX(g, s) {
+    const out = new Uint8Array(g.length);
+    for (let y = 0; y < AH; y++) {
+        for (let x = 0; x < AW; x++) {
+            const sx = Math.max(0, Math.min(AW - 1, x - s));
+            out[y * AW + x] = g[y * AW + sx];
+        }
+    }
+    return out;
 }
 
-console.log(`\n${p} passed, ${f} failed`); if(f) process.exit(1);
+// ---- シナリオ実行 ---------------------------------------------------------
+function run(frames, opts = {}) {
+    const det = Core.createDetector({ aw: AW, ah: AH, roi: ROI });
+    const trk = Core.createTracker({ aw: AW, roiX0: ROI.x0, roiX1: ROI.x1 });
+    const kinds = {};
+    let hit = null, hitAt = -1, points = 0;
+    for (let i = 0; i < frames.length; i++) {
+        const t = 1000 + i * (opts.dt || DT);
+        const r = det.feed(frames[i], t);
+        kinds[r.kind] = (kinds[r.kind] || 0) + 1;
+        if (r.kind === 'point') { if (trk.push(r.point)) points++; }
+        else if (r.kind === 'global') trk.reset();
+        trk.prune(t);
+        if (!hit && i > 3) {
+            const h = trk.evaluate();
+            if (h) { hit = h; hitAt = i; }
+        }
+    }
+    return { hit, hitAt, points, kinds };
+}
+
+/** 物体を左→右に一定速度で横切らせたフレーム列 */
+function crossing({ bg, draw, fromX, toX, frames, noise = 0, pre = 12, post = 6 }) {
+    const out = [];
+    for (let i = 0; i < pre; i++) out.push(noise ? withSensorNoise(bg, noise, 100 + i) : bg);
+    for (let i = 0; i < frames; i++) {
+        const g = noise ? withSensorNoise(bg, noise, 200 + i) : Uint8Array.from(bg);
+        const x = fromX + (toX - fromX) * (i / (frames - 1));
+        draw(g, x);
+        out.push(g);
+    }
+    for (let i = 0; i < post; i++) out.push(noise ? withSensorNoise(bg, noise, 300 + i) : bg);
+    return out;
+}
+
+const cy = AH * 0.5;
+const kmhOf = (hit) => Core.toKmh(hit.fracPerSec, 18.44, 0.33);
+
+// 1. 暗背景に明るい小球（遠いボール、3px）
+{
+    const bg = makeNoiseBg(60, 12);
+    const fr = crossing({ bg, draw: (g, x) => drawCircle(g, x, cy, 3, 235), fromX: 20, toX: 460, frames: 9, noise: 3 });
+    const r = run(fr);
+    A('小さな明るいボール（9フレーム横断）を検出', !!r.hit, JSON.stringify(r.kinds));
+}
+
+// 2. 明るい背景（白壁）に暗い指（幅 40px・枠を縦に貫く）
+{
+    const bg = makeNoiseBg(205, 4);
+    const fr = crossing({ bg, draw: (g, x) => drawRect(g, x - 20, 0, 40, AH, 70), fromX: 10, toX: 470, frames: 24, noise: 2 });
+    const r = run(fr);
+    A('白壁で指の横断を検出', !!r.hit, JSON.stringify(r.kinds));
+    if (r.hit) {
+        const expectFrac = (460 / AW) / ((24 - 1) * DT / 1000);
+        const err = Math.abs(r.hit.fracPerSec - expectFrac) / expectFrac;
+        A('指の速度が ±12% 以内', err < 0.12, `got=${r.hit.fracPerSec.toFixed(3)} expect=${expectFrac.toFixed(3)} kmh=${kmhOf(r.hit).toFixed(1)}`);
+    }
+}
+
+// 3. 模様のある背景に暗い指（テクスチャ背景でもパン誤判定しない）
+{
+    const bg = makeNoiseBg(140, 45, 3);
+    const fr = crossing({ bg, draw: (g, x) => drawRect(g, x - 18, 0, 36, AH, 30), fromX: 10, toX: 470, frames: 18, noise: 3 });
+    const r = run(fr);
+    A('模様背景で指の横断を検出', !!r.hit, JSON.stringify(r.kinds));
+}
+
+// 4. 速球（4フレームで横断）
+{
+    const bg = makeNoiseBg(90, 20, 5);
+    const fr = crossing({ bg, draw: (g, x) => drawCircle(g, x, cy, 4, 240), fromX: 60, toX: 430, frames: 4, noise: 3 });
+    const r = run(fr);
+    A('速球（4フレーム）を検出', !!r.hit, JSON.stringify(r.kinds) + ' pts=' + r.points);
+}
+
+// 5. 手のような大きい物体（幅 120px）も検出
+{
+    const bg = makeNoiseBg(120, 10, 9);
+    const fr = crossing({ bg, draw: (g, x) => drawRect(g, x - 60, 0, 120, AH, 40), fromX: 20, toX: 460, frames: 20, noise: 2 });
+    const r = run(fr);
+    A('大きい物体（手）の横断を検出', !!r.hit, JSON.stringify(r.kinds));
+}
+
+// 6. 枠の外（上端）を通る物体は無視
+{
+    const bg = makeNoiseBg(80, 15, 11);
+    const fr = crossing({ bg, draw: (g, x) => drawCircle(g, x, 20, 5, 240), fromX: 20, toX: 460, frames: 12, noise: 2 });
+    const r = run(fr);
+    A('枠外を通る物体は計測しない', !r.hit && r.points === 0, JSON.stringify(r.kinds));
+}
+
+// 7. 静止シーン＋センサーノイズ（3秒）で誤検知しない
+{
+    const bg = makeNoiseBg(150, 30, 13);
+    const fr = [];
+    for (let i = 0; i < 180; i++) fr.push(withSensorNoise(bg, 6, 500 + i));
+    const r = run(fr);
+    A('静止＋ノイズで誤検知しない', !r.hit, JSON.stringify(r.kinds));
+}
+
+// 8. 白壁の微動（明るさゆらぎ）で誤検知しない
+{
+    const bg = makeNoiseBg(215, 5, 17);
+    const fr = [];
+    for (let i = 0; i < 120; i++) {
+        const g = withSensorNoise(bg, 4, 700 + i);
+        const flick = Math.round(Math.sin(i / 3) * 6);
+        for (let k = 0; k < g.length; k++) g[k] = Math.max(0, Math.min(255, g[k] + flick));
+        fr.push(g);
+    }
+    const r = run(fr);
+    A('白壁のゆらぎで誤検知しない', !r.hit, JSON.stringify(r.kinds));
+}
+
+// 9. 手ブレ（毎フレーム ±3px の横ずれ）で誤検知しない
+{
+    const bg = makeNoiseBg(130, 40, 19);
+    const fr = [];
+    for (let i = 0; i < 120; i++) fr.push(withSensorNoise(shiftX(bg, Math.round(Math.sin(i * 1.7) * 3)), 3, 900 + i));
+    const r = run(fr);
+    A('手ブレで誤検知しない', !r.hit, JSON.stringify(r.kinds));
+}
+
+// 10. ゆっくりしたパン（毎フレーム 2px 一方向）で誤検知しない
+{
+    const bg = makeNoiseBg(130, 40, 23);
+    const fr = [];
+    for (let i = 0; i < 90; i++) fr.push(withSensorNoise(shiftX(bg, i * 2), 3, 1100 + i));
+    const r = run(fr);
+    A('カメラのパンで誤検知しない', !r.hit, JSON.stringify(r.kinds));
+}
+
+// 11. 露出変化（全体が徐々に明るくなる）で誤検知しない
+{
+    const bg = makeNoiseBg(100, 25, 29);
+    const fr = [];
+    for (let i = 0; i < 90; i++) {
+        const g = withSensorNoise(bg, 3, 1300 + i);
+        for (let k = 0; k < g.length; k++) g[k] = Math.min(255, g[k] + Math.round(i * 0.8));
+        fr.push(g);
+    }
+    const r = run(fr);
+    A('露出変化で誤検知しない', !r.hit, JSON.stringify(r.kinds));
+}
+
+// 12. 枠内に置いたまま止まっている指は吸収され、計測されない
+{
+    const bg = makeNoiseBg(190, 6, 31);
+    const fr = [];
+    for (let i = 0; i < 10; i++) fr.push(withSensorNoise(bg, 2, 1500 + i));
+    for (let i = 0; i < 120; i++) {
+        const g = withSensorNoise(bg, 2, 1600 + i);
+        drawRect(g, 230, 0, 30, AH, 60);
+        fr.push(g);
+    }
+    const r = run(fr);
+    A('止まった指は計測しない', !r.hit, JSON.stringify(r.kinds));
+}
+
+// 13. 右→左でも検出
+{
+    const bg = makeNoiseBg(70, 15, 37);
+    const fr = crossing({ bg, draw: (g, x) => drawCircle(g, x, cy, 5, 230), fromX: 460, toX: 20, frames: 10, noise: 3 });
+    const r = run(fr);
+    A('右→左の横断を検出', !!r.hit, JSON.stringify(r.kinds));
+}
+
+// 14. 30fps でもボールを検出（5フレーム横断）
+{
+    const bg = makeNoiseBg(90, 20, 41);
+    const fr = crossing({ bg, draw: (g, x) => drawCircle(g, x, cy, 4, 240), fromX: 40, toX: 440, frames: 5, noise: 3 });
+    const r = run(fr, { dt: 1000 / 30 });
+    A('30fps・5フレーム横断を検出', !!r.hit, JSON.stringify(r.kinds) + ' pts=' + r.points);
+}
+
+console.log(`\n${pass} passed, ${fail} failed`);
+if (fail) process.exit(1);

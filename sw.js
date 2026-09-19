@@ -1,8 +1,9 @@
 /* AI Speed Gun Pro — offline shell for installable PWA */
-const CACHE_VERSION = 'aispeedgun-v5.0';
+const CACHE_VERSION = 'aispeedgun-v6.0';
 const PRECACHE = [
   '/',
   '/index.html',
+  '/detector.js',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -38,7 +39,7 @@ self.addEventListener('fetch', (event) => {
     url.pathname === '/' ||
     url.pathname.endsWith('.html') ||
     url.pathname.endsWith('.webmanifest') ||
-    url.pathname.endsWith('sw.js')
+    url.pathname.endsWith('.js')
   ) {
     event.respondWith(
       fetch(request)
