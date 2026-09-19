@@ -5,7 +5,9 @@ const require = createRequire(import.meta.url);
 const Core = require('./detector.js');
 
 const AW = 480, AH = 270;
-const ROI = { x0: 0.10, x1: 0.90, y0: 0.335, y1: 0.665 };
+// index.html と同じ: 検出領域はガイドより広く、計測判定はガイド枠（10%〜90%）基準
+const ROI = { x0: 0.02, x1: 0.98, y0: 0.30, y1: 0.70 };
+const GUIDE = { x0: 0.10, x1: 0.90 };
 const FPS = 60;
 const DT = 1000 / FPS;
 
@@ -57,9 +59,9 @@ function shiftX(g, s) {
 // ---- シナリオ実行 ---------------------------------------------------------
 function run(frames, opts = {}) {
     const det = Core.createDetector({ aw: AW, ah: AH, roi: ROI });
-    const trk = Core.createTracker({ aw: AW, roiX0: ROI.x0, roiX1: ROI.x1 });
+    const trk = Core.createTracker({ aw: AW, roiX0: GUIDE.x0, roiX1: GUIDE.x1 });
     const kinds = {};
-    let hit = null, hitAt = -1, points = 0;
+    let hit = null, hitAt = -1, points = 0, maxPts = 0;
     for (let i = 0; i < frames.length; i++) {
         const t = 1000 + i * (opts.dt || DT);
         const r = det.feed(frames[i], t);
@@ -67,12 +69,13 @@ function run(frames, opts = {}) {
         if (r.kind === 'point') { if (trk.push(r.point)) points++; }
         else if (r.kind === 'global') trk.reset();
         trk.prune(t);
+        maxPts = Math.max(maxPts, trk.length);
         if (!hit && i > 3) {
-            const h = trk.evaluate();
+            const h = trk.evaluate(null, r.kind !== 'point');
             if (h) { hit = h; hitAt = i; }
         }
     }
-    return { hit, hitAt, points, kinds };
+    return { hit, hitAt, points, kinds, maxPts };
 }
 
 /** 物体を左→右に一定速度で横切らせたフレーム列 */
@@ -227,6 +230,61 @@ const kmhOf = (hit) => Core.toKmh(hit.fracPerSec, 18.44, 0.33);
     const fr = crossing({ bg, draw: (g, x) => drawCircle(g, x, cy, 4, 240), fromX: 40, toX: 440, frames: 5, noise: 3 });
     const r = run(fr, { dt: 1000 / 30 });
     A('30fps・5フレーム横断を検出', !!r.hit, JSON.stringify(r.kinds) + ' pts=' + r.points);
+}
+
+// ---- 速球（プロ野球レベル）---------------------------------------------
+const speedOf = (hit) => Core.toKmh(hit.fracPerSec, 18.44, 0.33);
+/** 速度 kmh の球を fps で撮影したフレーム列（モーションブラー付き） */
+function fastBall({ kmh, fps, bg, r = 3, contrast = 150, exposureFrac = 0.8, noise = 4 }) {
+    const visibleM = 18.44 * 0.33;
+    const pxPerSec = (kmh / 3.6) / visibleM * AW;
+    const pxPerFrame = pxPerSec / fps;
+    const blur = pxPerFrame * exposureFrac;                 // 露光中の移動＝筋の長さ
+    const level = Math.max(1, Math.round(contrast * Math.min(1, (2 * r) / Math.max(2 * r, blur)))); // 筋は暗くなる
+    const frames = [];
+    for (let i = 0; i < 10; i++) frames.push(withSensorNoise(bg, noise, 2000 + i));
+    let x = -blur;
+    let k = 0;
+    while (x < AW + blur && k < 40) {
+        const g = withSensorNoise(bg, noise, 2100 + k);
+        const base = bg[Math.floor(cy) * AW + Math.max(0, Math.min(AW - 1, Math.round(x)))];
+        const v = Math.min(255, base + level);
+        // 筋: x-blur .. x の横長の帯
+        drawRect(g, Math.round(x - blur), Math.round(cy - r), Math.max(1, Math.round(blur)) + 2 * r, 2 * r, v);
+        frames.push(g);
+        x += pxPerFrame;
+        k++;
+    }
+    for (let i = 0; i < 10; i++) frames.push(withSensorNoise(bg, noise, 2200 + i));
+    return { frames, pxPerSec };
+}
+for (const [kmh, fps] of [[150, 60], [160, 60], [150, 30], [130, 30], [110, 30], [175, 60]]) {
+    const bg = makeNoiseBg(85, 18, 50 + kmh + fps);
+    const { frames } = fastBall({ kmh, fps, bg });
+    const r = run(frames, { dt: 1000 / fps });
+    const got = r.hit ? speedOf(r.hit) : NaN;
+    A(`速球 ${kmh}km/h @${fps}fps を検出（ブラー付き）`, !!r.hit, JSON.stringify(r.kinds) + ' maxPts=' + r.maxPts);
+    if (r.hit) A(`  → 速度誤差 ±4%（測定 ${got.toFixed(1)}）`, Math.abs(got - kmh) / kmh < 0.04, `got=${got.toFixed(1)}`);
+}
+
+// 淡い筋（低コントラスト 18 レベル・ノイズ ±4）でも検出
+{
+    const bg = makeNoiseBg(120, 15, 77);
+    const { frames } = fastBall({ kmh: 140, fps: 60, bg, contrast: 18, exposureFrac: 0.0, noise: 4 });
+    const r = run(frames);
+    A('低コントラストの速球を検出', !!r.hit, JSON.stringify(r.kinds) + ' maxPts=' + r.maxPts);
+}
+
+// 2 点だけの偶発ノイズ（高さ・サイズが違う）は確定しない
+{
+    const bg = makeNoiseBg(100, 20, 91);
+    const fr = [];
+    for (let i = 0; i < 10; i++) fr.push(withSensorNoise(bg, 3, 3000 + i));
+    const g1 = withSensorNoise(bg, 3, 3100); drawCircle(g1, 120, AH * 0.36, 3, 240); fr.push(g1);
+    const g2 = withSensorNoise(bg, 3, 3101); drawRect(g2, 300, AH * 0.55, 30, 20, 240); fr.push(g2);
+    for (let i = 0; i < 10; i++) fr.push(withSensorNoise(bg, 3, 3200 + i));
+    const r = run(fr, { dt: 1000 / 30 });
+    A('高さ・サイズの違う 2 点ノイズは確定しない', !r.hit, JSON.stringify(r.kinds));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

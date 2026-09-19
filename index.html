@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - PRO FIELD v6.0</title>
+    <title>AIスピードガン プロ - PRO FIELD v6.1</title>
     <meta name="description" content="スマホで高精度に球速を測る AI Speed Gun Pro">
     <meta name="theme-color" content="#07140f">
     <meta name="mobile-web-app-capable" content="yes">
@@ -245,7 +245,7 @@
             <div class="flex items-start justify-between gap-3 px-0.5">
                 <div>
                     <div class="brand-mark">SPEED GUN</div>
-                    <div class="brand-sub">Pro Field v6.0</div>
+                    <div class="brand-sub">Pro Field v6.1</div>
                 </div>
                 <button id="settings-toggle" class="chip interactive" aria-expanded="false" aria-controls="settings-panel">
                     <span class="text-[var(--lime)] text-[10px] font-black">設定</span>
@@ -330,7 +330,7 @@
             <li><span class="text-[var(--lime)]">02</span> 「画面の横幅＝現場では」を正確に選ぶと球速が安定</li>
             <li><span class="text-[var(--lime)]">03</span> スマホは固定。手ブレは誤検知の主因</li>
             <li><span class="text-[var(--lime)]">04</span> ガイド枠を左→右（または右→左）へしっかり横切る</li>
-            <li><span class="text-[var(--lime)]">05</span> 動作確認は指や物を枠内で横切らせるだけでOK</li>
+            <li><span class="text-[var(--lime)]">05</span> 速球は明るい場所で。計測中の「fps」表示が 60 だと最も正確</li>
             <li><span class="text-[var(--lime)]">06</span> ホーム画面追加でアプリのように起動可能</li>
         </ul>
         <button id="close-modal" class="w-full mt-6 bg-[var(--lime)] text-black font-black py-3 rounded-2xl text-xs tracking-wide">閉じる</button>
@@ -366,7 +366,7 @@
     const visibleFracSelect = document.getElementById('visible-frac');
     const ctx = canvas.getContext('2d');
 
-    // ---- PRO FIELD v6.0 ---------------------------------------------------
+    // ---- PRO FIELD v6.1 ---------------------------------------------------
     // 検出コアは detector.js（背景モデル＋適応しきい値＋前景重心追跡）。
     const Core = window.SpeedGunCore;
     const AW = 480;
@@ -381,6 +381,8 @@
     const MAX_SPEED = 180;
     const WARMUP_MS = 220;
     const UI_ACTIVATE_DX = 0.08;
+    const FIRE_SPAN = 0.75;        // 枠幅のこの割合を横断したら確定してよい
+    const FIRE_MAX_WAIT_MS = 350;  // 遅い物体はこの時間で確定
     const SETTINGS_KEY = 'aispeedgun.pro.v5.settings';
     const DEBUG = /[?&]debug=1/.test(location.search);
 
@@ -389,8 +391,15 @@
     let analysisCanvas = null;
     let analysisCtx = null;
     let grayBuf = new Uint8Array(AW * AH);
-    let detector = Core.createDetector({ aw: AW, ah: AH, roi: { x0: FRAME_X0, x1: FRAME_X1, y0: FRAME_Y0, y1: FRAME_Y1 } });
+    // 検出領域はガイド枠より横に広く取り、速球の軌道点を 1〜2 点多く確保する
+    // （枠の左右 8% 幅の外側と、上下に少し余裕）。計測判定はガイド枠基準のまま。
+    const DETECT_X0 = 0.02, DETECT_X1 = 0.98, DETECT_Y0 = 0.30, DETECT_Y1 = 0.70;
+    let detector = Core.createDetector({ aw: AW, ah: AH, roi: { x0: DETECT_X0, x1: DETECT_X1, y0: DETECT_Y0, y1: DETECT_Y1 } });
     let tracker = Core.createTracker({ aw: AW, roiX0: FRAME_X0, roiX1: FRAME_X1 });
+    let cameraFps = 0;      // カメラ設定上の fps
+    let measuredFps = 0;    // 実測 fps
+    let measuredFrames = 0;
+    let fpsWindowStart = performance.now();
     let scanStart = 0;
     let fired = false;
     let loopOn = false;
@@ -503,17 +512,51 @@
         return true;
     }
 
+    /** 高フレームレート優先でカメラを取得（速球は 60fps が精度の鍵） */
+    async function acquireStream() {
+        const attempts = [
+            // 720p60: 多くの端末で 60fps が実際に出る
+            { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60, min: 50 } },
+            // 1080p で 60fps を要望
+            { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 60, min: 24 } },
+            // 最低限
+            { facingMode: { ideal: 'environment' } }
+        ];
+        let lastErr = null;
+        for (const constraints of attempts) {
+            try {
+                return await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false });
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        throw lastErr || new Error('camera unavailable');
+    }
+
+    /** 取得後に 60fps へ引き上げを試み、実効 fps を記録 */
+    async function tuneTrack(stream) {
+        const track = stream.getVideoTracks()[0];
+        if (!track) return;
+        try {
+            const caps = track.getCapabilities ? track.getCapabilities() : null;
+            const maxFps = caps && caps.frameRate && caps.frameRate.max;
+            if (maxFps && maxFps >= 60) {
+                const s = track.getSettings ? track.getSettings() : {};
+                if (!s.frameRate || s.frameRate < 59) {
+                    await track.applyConstraints({ frameRate: { ideal: Math.min(60, maxFps) } });
+                }
+            }
+        } catch (_) { /* 非対応端末は無視 */ }
+        try {
+            const s = track.getSettings ? track.getSettings() : {};
+            cameraFps = s.frameRate ? Math.round(s.frameRate) : 0;
+        } catch (_) { /* ignore */ }
+    }
+
     async function startCamera() {
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: { ideal: 'environment' },
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 },
-                    frameRate: { ideal: 60, min: 24 }
-                },
-                audio: false
-            });
+            const stream = await acquireStream();
+            await tuneTrack(stream);
             video.srcObject = stream;
             video.muted = true;
             video.playsInline = true;
@@ -543,8 +586,16 @@
         const useRvfc = typeof video.requestVideoFrameCallback === 'function';
         if (useRvfc) {
             const tickRvfc = (now, meta) => {
-                // RVFC の presentationTime はフレーム提示時刻（performance と同系）で間隔が正確
-                frameStampMs = (meta && meta.presentationTime) || now;
+                // mediaTime はカメラ由来のフレーム時刻で間隔が最も正確（速球の速度精度に直結）
+                if (meta && meta.mediaTime > 0) frameStampMs = meta.mediaTime * 1000;
+                else frameStampMs = (meta && meta.presentationTime) || now;
+                measuredFrames++;
+                const wall = performance.now();
+                if (wall - fpsWindowStart >= 1000) {
+                    measuredFps = Math.round(measuredFrames * 1000 / (wall - fpsWindowStart));
+                    measuredFrames = 0;
+                    fpsWindowStart = wall;
+                }
                 tick();
                 if (loopOn) video.requestVideoFrameCallback(tickRvfc);
             };
@@ -642,19 +693,24 @@
         if (wall - lastUi > 250) {
             lastUi = wall;
             const active = tracker.length > 0 && tracker.progress() >= UI_ACTIVATE_DX;
-            statusBadge.innerText = active ? '追跡中' : '計測中';
+            const fps = measuredFps || cameraFps;
+            statusBadge.innerText = (active ? '追跡中' : '計測中') + (fps ? ` · ${fps}fps` : '');
             if (!active) clearProgress();
             if (DEBUG && debugLine && res) {
-                debugLine.innerText = `${res.kind} thr=${res.thr ?? '-'} fg=${res.fgFrac != null ? (res.fgFrac * 100).toFixed(1) + '%' : '-'} pts=${tracker.length}`;
+                debugLine.innerText = `${res.kind} thr=${res.thr ?? '-'} fg=${res.fgFrac != null ? (res.fgFrac * 100).toFixed(1) + '%' : '-'} pts=${tracker.length} cam=${cameraFps}fps run=${measuredFps}fps`;
             }
         }
 
         if (fired || wall - scanStart < WARMUP_MS) return;
-        tryFire();
+        // 精度優先: 物体が去った／枠の 75% を横断した／0.35 秒追跡した時点で、できるだけ多くの点を使って確定
+        const settled = !(res && res.kind === 'point');
+        if (settled || tracker.spanFrac() >= FIRE_SPAN || tracker.durationMs() >= FIRE_MAX_WAIT_MS) {
+            tryFire(settled);
+        }
     }
 
-    function tryFire() {
-        const hit = tracker.evaluate();
+    function tryFire(settled) {
+        const hit = tracker.evaluate(null, settled);
         if (!hit) return;
         const kmh = toKmhFromFrac(hit.fracPerSec);
         if (!isFinite(kmh) || kmh < MIN_SPEED || kmh > MAX_SPEED) return;

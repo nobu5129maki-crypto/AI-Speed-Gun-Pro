@@ -15,11 +15,12 @@
         aw: 480,
         ah: 270,
         roi: { x0: 0.10, x1: 0.90, y0: 0.335, y1: 0.665 }, // HTML のガイド枠と一致
-        // しきい値: 差分分布の下位パーセンタイル（＝背景ノイズ）から算出
-        minThr: 14,
+        // しきい値: 3x3 平滑化した差分分布の下位パーセンタイル（＝背景ノイズ）から算出
+        // 平滑化で画素ノイズを約 1/3 に抑え、速球のモーションブラー（淡い筋）も拾う
+        minThr: 7,
         maxThr: 72,
         noiseGain: 2.6,
-        noiseOffset: 8,
+        noiseOffset: 4,
         noisePercentile: 0.55,
         // 前景の大きさ
         minPixels: 6,          // これ未満はノイズ
@@ -56,6 +57,11 @@
         minDt: 0.012,
         maxDt: 1.4,
         twoPointMaxDt: 0.25, // 2点のみで確定できる最大時間（両ゾーン通過時）
+        // 速球用 2 点確定（30fps で枠内に 2 フレームしか映らない球）
+        fastTwoPointMaxDt: 0.09, // 2 点の時間差がこれ以下
+        fastTwoPointSpan: 0.20,  // 枠幅比でこれ以上移動
+        fastTwoPointDyRatio: 0.35, // |dy| <= dx * 比
+        fastTwoPointSizeRatio: 3.0, // 前景サイズ比がこれ以下（同一物体）
         minLinearity: 0.42,
         minDirection: 0.52,
         minHorizRatio: 0.38,
@@ -87,7 +93,12 @@
         const roiN = roiW * roiH;
 
         let bg = null;                      // Float32Array(aw*ah) 背景（ROI のみ使用）
-        const diffBuf = new Uint8Array(aw * ah);
+        const diffBuf = new Uint8Array(aw * ah);   // |gray - bg|
+        const hsum = new Uint16Array(aw * ah);     // 横 3 画素和
+        const smooth = new Uint8Array(aw * ah);    // 3x3 平均
+        // 平滑化用に ROI を 1 画素外側まで差分計算する
+        const ex0 = Math.max(0, roi.x0 - 1), ex1 = Math.min(aw, roi.x1 + 1);
+        const ey0 = Math.max(0, roi.y0 - 1), ey1 = Math.min(ah, roi.y1 + 1);
         const hist = new Int32Array(256);
         const colHit = new Uint8Array(aw);
         const profile = new Float32Array(aw);
@@ -149,8 +160,35 @@
                 const row = y * aw;
                 for (let x = roi.x0; x < roi.x1; x++) {
                     const i = row + x;
-                    const a = diffBuf[i] >= thr ? a1 : a0;
+                    const a = smooth[i] >= thr ? a1 : a0;
                     bg[i] += a * (gray[i] - bg[i]);
+                }
+            }
+        }
+
+        /** |gray-bg| を ROI（＋1画素）で計算し、3x3 平均を smooth に書く */
+        function computeSmoothDiff(gray) {
+            for (let y = ey0; y < ey1; y++) {
+                const row = y * aw;
+                for (let x = ex0; x < ex1; x++) {
+                    const i = row + x;
+                    let d = gray[i] - bg[i];
+                    if (d < 0) d = -d;
+                    diffBuf[i] = d > 255 ? 255 : (d | 0);
+                }
+                for (let x = roi.x0; x < roi.x1; x++) {
+                    const i = row + x;
+                    const l = x > 0 ? diffBuf[i - 1] : diffBuf[i];
+                    const r = x < aw - 1 ? diffBuf[i + 1] : diffBuf[i];
+                    hsum[i] = l + diffBuf[i] + r;
+                }
+            }
+            for (let y = roi.y0; y < roi.y1; y++) {
+                const row = y * aw;
+                const up = y > 0 ? row - aw : row;
+                const dn = y < ah - 1 ? row + aw : row;
+                for (let x = roi.x0; x < roi.x1; x++) {
+                    smooth[row + x] = ((hsum[up + x] + hsum[row + x] + hsum[dn + x]) / 9) | 0;
                 }
             }
         }
@@ -172,18 +210,12 @@
             }
             const pan = estimatePan(gray);
 
-            // 差分ヒストグラム（ROI）
+            // 平滑化差分とヒストグラム（ROI）
+            computeSmoothDiff(gray);
             hist.fill(0);
             for (let y = roi.y0; y < roi.y1; y++) {
                 const row = y * aw;
-                for (let x = roi.x0; x < roi.x1; x++) {
-                    const i = row + x;
-                    let d = gray[i] - bg[i];
-                    if (d < 0) d = -d;
-                    d = d > 255 ? 255 : (d | 0);
-                    diffBuf[i] = d;
-                    hist[d]++;
-                }
+                for (let x = roi.x0; x < roi.x1; x++) hist[smooth[row + x]]++;
             }
             let acc = 0, pct = 0;
             const target = roiN * o.noisePercentile;
@@ -196,18 +228,23 @@
             // 前景統計
             colHit.fill(0);
             let fg = 0, sw = 0, sx = 0, sy = 0, sxx = 0, syy = 0;
+            let minX = aw, maxX = -1;
             for (let y = roi.y0; y < roi.y1; y++) {
                 const row = y * aw;
                 for (let x = roi.x0; x < roi.x1; x++) {
-                    const d = diffBuf[row + x];
+                    const d = smooth[row + x];
                     if (d < thr) continue;
                     fg++;
                     sw += d;
                     sx += x * d; sy += y * d;
                     sxx += x * x * d; syy += y * y * d;
                     colHit[x] = 1;
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
                 }
             }
+            // 前景が検出領域の左右端に接している＝物体が一部しか映っておらず重心が内側に寄る
+            const clipped = minX <= roi.x0 + 1 || maxX >= roi.x1 - 2;
             const fgFrac = fg / roiN;
             let activeCols = 0;
             for (let x = roi.x0; x < roi.x1; x++) activeCols += colHit[x];
@@ -257,7 +294,7 @@
 
             return {
                 kind: 'point',
-                point: { x: mx, y: my, t, w: sw, n: fg },
+                point: { x: mx, y: my, t, w: sw, n: fg, clipped },
                 thr,
                 fgFrac,
                 spreadX,
@@ -361,7 +398,7 @@
                     return false;
                 }
             }
-            pts.push({ x: p.x, y: p.y, t: p.t, w: p.w || 1 });
+            pts.push({ x: p.x, y: p.y, t: p.t, w: p.w || 1, n: p.n || 0, clipped: !!p.clipped });
             return true;
         }
 
@@ -377,6 +414,18 @@
             const st = trackStats(pts, aw);
             if (!st) return 0;
             return Math.min(1, st.dx / needDx());
+        }
+
+        /** 軌道の横断量（枠幅比） */
+        function spanFrac() {
+            if (pts.length < 2) return 0;
+            return Math.abs(pts[pts.length - 1].x - pts[0].x) / roiW;
+        }
+
+        /** 軌道の継続時間 ms */
+        function durationMs() {
+            if (pts.length < 2) return 0;
+            return pts[pts.length - 1].t - pts[0].t;
         }
 
         function zones(list) {
@@ -411,23 +460,45 @@
             return list.slice(1, list.length - 1);
         }
 
+        /** 速球の 2 点軌道: 短時間・大移動・同高さ・同サイズなら同一物体とみなす */
+        function fastTwoPoint(list, st) {
+            if (list.length !== 2) return false;
+            if (st.dt > o.fastTwoPointMaxDt) return false;
+            if (st.dx < roiW * o.fastTwoPointSpan) return false;
+            if (st.dy > st.dx * o.fastTwoPointDyRatio) return false;
+            const n0 = list[0].n || 1, n1 = list[1].n || 1;
+            const ratio = Math.max(n0, n1) / Math.max(1, Math.min(n0, n1));
+            return ratio <= o.fastTwoPointSizeRatio;
+        }
+
         /**
          * 軌道を評価し、確定できれば速度（画面幅比 / 秒）を返す
-         * @returns {null | {fracPerSec:number, points:number, stats:object, reason?:string}}
+         * @param {Array=} list  評価する点列（省略時は内部軌道）
+         * @param {boolean=} settled  このフレームで新しい点が来ていない（物体が去った）
+         * @returns {null | {fracPerSec:number, points:number, stats:object}}
          */
-        function evaluate(list) {
+        function evaluate(list, settled) {
             const src = list || pts;
             if (src.length < 2) return null;
             const cleaned = cleanTrack(src);
-            const core = coreSegment(cleaned);
-            const use = core.length >= 2 ? core : cleaned;
+            // 端で切れている点（重心が内側に寄る）は速度推定から外す。足りなければ全点を使う
+            const whole = cleaned.filter(p => !p.clipped);
+            const basis = whole.length >= 2 ? whole : cleaned;
+            const core = coreSegment(basis);
+            const use = core.length >= 2 ? core : basis;
 
             const z = zones(cleaned);
             const st = trackStats(use, aw);
             if (!st) return null;
 
-            if (use.length < o.minPoints) {
-                if (!(use.length >= 2 && z.both && st.dt <= o.twoPointMaxDt)) return null;
+            if (cleaned.length < o.minPoints || use.length < 2) {
+                const zonePass = use.length >= 2 && z.both && st.dt <= o.twoPointMaxDt;
+                // 2 点の速球は物体が去った後（settled）に確定し、ノイズ 2 点の即発火を防ぐ
+                const fastPass = !!settled && use.length === 2 && fastTwoPoint(use, st);
+                if (!zonePass && !fastPass) return null;
+            } else if (use.length === 2 && !z.both) {
+                // 端の点を除いて 2 点しか残らない場合も、速球ルールで同一物体を確認
+                if (!(settled && fastTwoPoint(use, st))) return null;
             }
             if (!z.both && st.dx < needDx()) return null;
             if (st.dx < st.dy * o.dyRatio) return null;
@@ -446,6 +517,8 @@
             prune,
             reset,
             progress,
+            spanFrac,
+            durationMs,
             evaluate,
             get points() { return pts; },
             get length() { return pts.length; },
@@ -453,13 +526,9 @@
         };
     }
 
-    /** 画面幅比/秒 → km/h（画角補正込み） */
+    /** 画面幅比/秒 → km/h（画面横幅の実距離 = 総距離 × 画面割合。物理換算のみ、係数補正なし） */
     function toKmh(fracPerSec, totalDistM, visibleFrac) {
-        let kmh = fracPerSec * totalDistM * visibleFrac * 3.6;
-        if (visibleFrac <= 0.25) kmh *= 0.9;
-        else if (visibleFrac <= 0.33) kmh *= 0.93;
-        else if (visibleFrac <= 0.5) kmh *= 0.96;
-        return kmh;
+        return fracPerSec * totalDistM * visibleFrac * 3.6;
     }
 
     return {
