@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - PRO FIELD v6.1</title>
+    <title>AIスピードガン プロ - PRO FIELD v6.2</title>
     <meta name="description" content="スマホで高精度に球速を測る AI Speed Gun Pro">
     <meta name="theme-color" content="#07140f">
     <meta name="mobile-web-app-capable" content="yes">
@@ -186,7 +186,7 @@
             margin-top: 0;
         }
         .settings-panel.open {
-            max-height: 240px;
+            max-height: 280px;
             opacity: 1;
             margin-top: 0.55rem;
         }
@@ -203,10 +203,10 @@
             pointer-events: auto;
         }
 
-        #dist-input::-webkit-outer-spin-button,
-        #dist-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        #dist-input[type=number] { -moz-appearance: textfield; }
-        #visible-frac { -webkit-appearance: none; appearance: none; }
+        #cam-dist::-webkit-outer-spin-button,
+        #cam-dist::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        #cam-dist[type=number] { -moz-appearance: textfield; }
+        #ball-type { -webkit-appearance: none; appearance: none; }
 
         @keyframes brandIn {
             from { opacity: 0; transform: translateY(10px); }
@@ -245,30 +245,30 @@
             <div class="flex items-start justify-between gap-3 px-0.5">
                 <div>
                     <div class="brand-mark">SPEED GUN</div>
-                    <div class="brand-sub">Pro Field v6.1</div>
+                    <div class="brand-sub">Pro Field v6.2</div>
                 </div>
                 <button id="settings-toggle" class="chip interactive" aria-expanded="false" aria-controls="settings-panel">
                     <span class="text-[var(--lime)] text-[10px] font-black">設定</span>
-                    <span>距離 / 画角</span>
+                    <span>球種 / 距離</span>
                 </button>
             </div>
 
             <div id="settings-panel" class="settings-panel glass-panel px-3 py-3 interactive w-full">
-                <div class="flex flex-wrap items-center gap-x-2 gap-y-2">
-                    <label for="dist-input" class="text-[11px] text-white/70 font-bold">ピッチャー〜打者</label>
+                <div class="flex flex-col gap-1">
+                    <label for="ball-type" class="text-[11px] text-white/70 font-bold">球種（実寸で速度を計算）</label>
+                    <select id="ball-type" class="bg-white/10 text-[12px] font-bold text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] py-2.5 px-2 w-full min-h-[42px]">
+                        <option value="0.074" selected>硬式球 74mm</option>
+                        <option value="0.072">軟式M号 72mm</option>
+                        <option value="0.068">軟式J号 68mm</option>
+                        <option value="0.097">ソフトボール 97mm</option>
+                    </select>
+                </div>
+                <div class="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-2">
+                    <label for="cam-dist" class="text-[11px] text-white/70 font-bold">カメラから球筋まで</label>
                     <div class="flex items-center gap-1">
-                        <input type="number" id="dist-input" value="18.44" step="0.01" aria-label="ピッチャーから打者までの距離（メートル）" class="bg-white/10 text-sm font-extrabold w-[4.75rem] py-1.5 px-2 text-center text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] min-h-[34px]">
+                        <input type="number" id="cam-dist" value="8" min="1" max="40" step="0.1" aria-label="カメラから球筋までの距離（メートル）" class="bg-white/10 text-sm font-extrabold w-[4.75rem] py-1.5 px-2 text-center text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] min-h-[34px]">
                         <span class="text-xs text-white/45 font-bold">m</span>
                     </div>
-                </div>
-                <div class="mt-2.5 flex flex-col gap-1">
-                    <label for="visible-frac" class="text-[11px] text-white/70 font-bold">画面の横幅＝現場では</label>
-                    <select id="visible-frac" title="球速換算に必須" class="bg-white/10 text-[12px] font-bold text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] py-2.5 px-2 w-full min-h-[42px]">
-                        <option value="1.0">ほぼ全幅（正面）</option>
-                        <option value="0.5">約半分</option>
-                        <option value="0.33" selected>約3分の1（横から・標準）</option>
-                        <option value="0.25">約4分の1（アップ）</option>
-                    </select>
                 </div>
             </div>
 
@@ -281,6 +281,7 @@
                     <div class="flex items-end gap-2">
                         <span id="speed-display" class="speed-hero">---</span>
                         <span class="speed-unit pb-1">km/h</span>
+                        <span id="speed-method" class="text-[10px] font-bold text-white/45 pb-1"></span>
                     </div>
                 </div>
                 <div class="glass-panel p-3 w-[34%] min-w-[6.5rem]">
@@ -326,8 +327,8 @@
     <div class="bg-[#0b1a14] border border-[rgba(200,245,66,0.2)] rounded-3xl p-6 w-full max-w-sm">
         <h2 class="font-['Bebas_Neue'] text-[1.8rem] text-[var(--lime)] tracking-wide mb-3">高精度のコツ</h2>
         <ul class="space-y-3.5 text-sm font-bold text-white/90 leading-relaxed">
-            <li><span class="text-[var(--lime)]">01</span> 距離は現場に合わせる（プロ 18.44m / 少年は変更）</li>
-            <li><span class="text-[var(--lime)]">02</span> 「画面の横幅＝現場では」を正確に選ぶと球速が安定</li>
+            <li><span class="text-[var(--lime)]">01</span> 球種を選ぶ。映った球の太さから速度を計算します</li>
+            <li><span class="text-[var(--lime)]">02</span> スマホから球筋までの直角距離をメジャーで測る</li>
             <li><span class="text-[var(--lime)]">03</span> スマホは固定。手ブレは誤検知の主因</li>
             <li><span class="text-[var(--lime)]">04</span> ガイド枠を左→右（または右→左）へしっかり横切る</li>
             <li><span class="text-[var(--lime)]">05</span> 速球は明るい場所で。計測中の「fps」表示が 60 だと最も正確</li>
@@ -362,11 +363,14 @@
     const guideFrame = document.getElementById('guide-frame');
     const guideProgL = document.getElementById('guide-progress-left');
     const guideProgR = document.getElementById('guide-progress-right');
-    const distInput = document.getElementById('dist-input');
-    const visibleFracSelect = document.getElementById('visible-frac');
+    const ballType = document.getElementById('ball-type');
+    const camDistInput = document.getElementById('cam-dist');
+    const speedMethod = document.getElementById('speed-method');
     const ctx = canvas.getContext('2d');
 
-    // ---- PRO FIELD v6.1 ---------------------------------------------------
+    // ---- PRO FIELD v6.2 ---------------------------------------------------
+    // 速度は球の実寸 ÷ 映った太さ。距離は球が小さいときの予備。
+    const FULL_HFOV_DEG = 68;
     // 検出コアは detector.js（背景モデル＋適応しきい値＋前景重心追跡）。
     const Core = window.SpeedGunCore;
     const AW = 480;
@@ -383,7 +387,7 @@
     const UI_ACTIVATE_DX = 0.08;
     const FIRE_SPAN = 0.75;        // 枠幅のこの割合を横断したら確定してよい
     const FIRE_MAX_WAIT_MS = 350;  // 遅い物体はこの時間で確定
-    const SETTINGS_KEY = 'aispeedgun.pro.v5.settings';
+    const SETTINGS_KEY = 'aispeedgun.pro.v62.settings';
     const DEBUG = /[?&]debug=1/.test(location.search);
 
     let appState = 0;
@@ -426,6 +430,7 @@
             holdBadge.classList.add('hidden');
             speedDisplay.innerText = '---';
             speedDisplay.classList.remove('pop');
+            if (speedMethod) speedMethod.textContent = '';
             clearProgress();
         } else if (state === 1) {
             mainBtn.innerText = '計測中...';
@@ -470,17 +475,17 @@
             const raw = localStorage.getItem(SETTINGS_KEY);
             if (!raw) return;
             const data = JSON.parse(raw);
-            if (data.dist != null && Number.isFinite(+data.dist)) distInput.value = String(data.dist);
-            if (data.vis != null && visibleFracSelect.querySelector(`option[value="${data.vis}"]`)) {
-                visibleFracSelect.value = String(data.vis);
+            if (data.ball != null && ballType.querySelector(`option[value="${data.ball}"]`)) {
+                ballType.value = String(data.ball);
             }
+            if (data.cam != null && Number.isFinite(+data.cam)) camDistInput.value = String(data.cam);
         } catch (_) { /* ignore */ }
     }
     function saveSettings() {
         try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-                dist: parseFloat(distInput.value) || 18.44,
-                vis: parseFloat(visibleFracSelect.value) || 0.33
+                ball: ballType.value,
+                cam: parseFloat(camDistInput.value) || 8
             }));
         } catch (_) { /* ignore */ }
     }
@@ -670,10 +675,17 @@
         return detector.feed(grayBuf, frameStampMs || performance.now());
     }
 
-    function toKmhFromFrac(fracPerSec) {
-        const totalDist = parseFloat(distInput.value) || 18.44;
-        const vis = parseFloat(visibleFracSelect.value) || 0.33;
-        return Core.toKmh(fracPerSec, totalDist, vis);
+    function measurementOptions() {
+        const diameterM = parseFloat(ballType.value) || 0.074;
+        const distanceM = parseFloat(camDistInput.value) || 8;
+        const crop = updateViewCrop();
+        const vidW = (frameSource && frameSource.width) || video.videoWidth || crop.w || 1;
+        const cropFrac = Math.max(0.05, Math.min(1, crop.w / vidW));
+        return {
+            diameterM,
+            sceneWidthM: Core.sceneWidthMeters(distanceM, FULL_HFOV_DEG, cropFrac),
+            frameWidth: AW
+        };
     }
 
     function process() {
@@ -712,22 +724,26 @@
     function tryFire(settled) {
         const hit = tracker.evaluate(null, settled);
         if (!hit) return;
-        const kmh = toKmhFromFrac(hit.fracPerSec);
-        if (!isFinite(kmh) || kmh < MIN_SPEED || kmh > MAX_SPEED) return;
+        const solved = Core.solveSpeed(hit.samples, measurementOptions());
+        const kmh = solved ? solved.kmh : NaN;
+        if (!solved || !isFinite(kmh) || kmh < MIN_SPEED || kmh > MAX_SPEED) return;
+        // 球径が測れるまでは確定しない。距離換算は球が枠を抜けたあとだけ使う。
+        if (solved.method !== 'size' && !settled) return;
 
         fired = true;
         tracker.reset();
         clearProgress();
-        onHit(Math.round(kmh * 10) / 10);
+        onHit(Math.round(kmh * 10) / 10, solved.method);
     }
 
-    function onHit(speed) {
+    function onHit(speed, method) {
         if (appState !== 1) return;
         speedDisplay.classList.remove('pop');
         // reflow to retrigger animation
         void speedDisplay.offsetWidth;
         speedDisplay.innerText = speed.toFixed(1);
         speedDisplay.classList.add('pop');
+        if (speedMethod) speedMethod.textContent = method === 'distance' ? '距離' : '球径';
         if (speed > maxSpeed) {
             maxSpeed = speed;
             maxSpeedDisplay.innerText = maxSpeed.toFixed(1);
@@ -758,8 +774,8 @@
         if (panel.classList.contains('open')) closeSettings();
         else openSettings();
     };
-    distInput.addEventListener('change', saveSettings);
-    visibleFracSelect.addEventListener('change', saveSettings);
+    ballType.addEventListener('change', saveSettings);
+    camDistInput.addEventListener('change', saveSettings);
     window.onload = () => {
         document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
         loadSettings();
@@ -834,7 +850,8 @@
         get lastResult() { return lastResult; },
         get viewCrop() { return viewCrop; },
         get appState() { return appState; },
-        toKmhFromFrac,
+        measurementOptions,
+        solveSpeed: (samples) => Core.solveSpeed(samples, measurementOptions()),
         AW, AH,
         // テスト用フック: 任意の描画ソースをフレーム時刻付きで 1 フレーム処理
         setSource(el) {

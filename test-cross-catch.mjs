@@ -287,5 +287,112 @@ for (const [kmh, fps] of [[150, 60], [160, 60], [150, 30], [130, 30], [110, 30],
     A('高さ・サイズの違う 2 点ノイズは確定しない', !r.hit, JSON.stringify(r.kinds));
 }
 
+// ---- 球径から速度（焦点距離も撮影距離も不要）--------------------------
+function measureBall({ radius, fromX, toX, frames, dt, diameterM }) {
+    const bg = makeNoiseBg(80, 8, 42);
+    const fr = crossing({
+        bg,
+        draw: (g, x) => drawCircle(g, x, cy, radius, 240),
+        fromX, toX, frames, noise: 2
+    });
+    const det = Core.createDetector({ aw: AW, ah: AH, roi: ROI });
+    const trk = Core.createTracker({ aw: AW, roiX0: GUIDE.x0, roiX1: GUIDE.x1 });
+    let hit = null;
+    const step = dt || DT;
+    for (let i = 0; i < fr.length; i++) {
+        const t = 1000 + i * step;
+        const r = det.feed(fr[i], t);
+        if (r.kind === 'point') trk.push(r.point);
+        else if (r.kind === 'global') trk.reset();
+        trk.prune(t);
+        if (!hit && i > 3) {
+            const h = trk.evaluate(null, r.kind !== 'point');
+            if (h) hit = h;
+        }
+    }
+    if (!hit) return null;
+    const pxPerSec = Math.abs(toX - fromX) / ((frames - 1) * step / 1000);
+    const expect = pxPerSec * (diameterM / (radius * 2)) * 3.6;
+    const solved = Core.solveSpeed(hit.samples, { diameterM, sceneWidthM: 0, frameWidth: AW });
+    return { hit, solved, expect, pxPerSec };
+}
+
+{
+    const diameterM = 0.074;
+    const radius = 9;
+    const m = measureBall({ radius, fromX: 40, toX: 440, frames: 12, diameterM });
+    A('球径換算で速度を返す', !!(m && m.solved && m.solved.method === 'size'), JSON.stringify(m && m.solved));
+    if (m && m.solved) {
+        const err = Math.abs(m.solved.kmh - m.expect) / m.expect;
+        A('球径換算の速度が ±8% 以内', err < 0.08, `got=${m.solved.kmh.toFixed(1)} expect=${m.expect.toFixed(1)} diam=${m.solved.diameterPx}`);
+    }
+}
+
+{
+    // 横に長い筋。太さ（高さ）だけを球径として使う
+    const bg = makeNoiseBg(90, 6, 88);
+    const radius = 6;
+    const blur = 28;
+    const framesN = 8;
+    const fromX = 50, toX = 420;
+    const fr = crossing({
+        bg,
+        draw: (g, x) => drawRect(g, x - blur / 2, cy - radius, blur, radius * 2, 235),
+        fromX, toX, frames: framesN, noise: 2
+    });
+    const det = Core.createDetector({ aw: AW, ah: AH, roi: ROI });
+    const trk = Core.createTracker({ aw: AW, roiX0: GUIDE.x0, roiX1: GUIDE.x1 });
+    let hit = null;
+    for (let i = 0; i < fr.length; i++) {
+        const t = 1000 + i * DT;
+        const r = det.feed(fr[i], t);
+        if (r.kind === 'point') trk.push(r.point);
+        if (!hit && i > 3) {
+            const h = trk.evaluate(null, r.kind !== 'point');
+            if (h) hit = h;
+        }
+    }
+    const diameterM = 0.074;
+    const pxPerSec = Math.abs(toX - fromX) / ((framesN - 1) * DT / 1000);
+    const expect = pxPerSec * (diameterM / (radius * 2)) * 3.6;
+    const solved = hit && Core.solveSpeed(hit.samples, { diameterM, sceneWidthM: 0, frameWidth: AW });
+    A('モーションブラーでも太さから速度を出す', !!(solved && solved.method === 'size'), JSON.stringify(solved));
+    if (solved) {
+        const err = Math.abs(solved.kmh - expect) / expect;
+        A('ブラーありの速度が ±12% 以内', err < 0.12, `got=${solved.kmh.toFixed(1)} expect=${expect.toFixed(1)} diam=${solved.diameterPx}`);
+    }
+}
+
+{
+    const sceneWidthM = 3.2;
+    const fromX = 30, toX = 450, framesN = 10;
+    const bg = makeNoiseBg(100, 8, 99);
+    const fr = crossing({
+        bg,
+        draw: (g, x) => drawRect(g, x - 8, 40, 16, 180, 30),
+        fromX, toX, frames: framesN, noise: 2
+    });
+    const det = Core.createDetector({ aw: AW, ah: AH, roi: ROI });
+    const trk = Core.createTracker({ aw: AW, roiX0: GUIDE.x0, roiX1: GUIDE.x1 });
+    let hit = null;
+    for (let i = 0; i < fr.length; i++) {
+        const t = 1000 + i * DT;
+        const r = det.feed(fr[i], t);
+        if (r.kind === 'point') trk.push(r.point);
+        if (!hit && i > 3) {
+            const h = trk.evaluate(null, r.kind !== 'point');
+            if (h) hit = h;
+        }
+    }
+    const solved = hit && Core.solveSpeed(hit.samples, { diameterM: 0.074, sceneWidthM, frameWidth: AW });
+    const pxPerSec = Math.abs(toX - fromX) / ((framesN - 1) * DT / 1000);
+    const expect = (pxPerSec / AW) * sceneWidthM * 3.6;
+    A('球でない物体は距離換算に落とす', !!(solved && solved.method === 'distance'), JSON.stringify(solved));
+    if (solved && solved.method === 'distance') {
+        const err = Math.abs(solved.kmh - expect) / expect;
+        A('距離換算の速度が ±12% 以内', err < 0.12, `got=${solved.kmh.toFixed(1)} expect=${expect.toFixed(1)}`);
+    }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

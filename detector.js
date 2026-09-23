@@ -166,6 +166,30 @@
             }
         }
 
+        /** 重心を通る前景の幅と高さ（モーションブラーの長軸と、球の太さ） */
+        function blobExtent(smoothImg, thr, cx, cy) {
+            const x = clamp(Math.round(cx), roi.x0, roi.x1 - 1);
+            const y = clamp(Math.round(cy), roi.y0, roi.y1 - 1);
+            let top = y, bot = y, left = x, right = x;
+            for (let yy = y; yy >= roi.y0; yy--) {
+                if (smoothImg[yy * aw + x] < thr) break;
+                top = yy;
+            }
+            for (let yy = y + 1; yy < roi.y1; yy++) {
+                if (smoothImg[yy * aw + x] < thr) break;
+                bot = yy;
+            }
+            for (let xx = x; xx >= roi.x0; xx--) {
+                if (smoothImg[y * aw + xx] < thr) break;
+                left = xx;
+            }
+            for (let xx = x + 1; xx < roi.x1; xx++) {
+                if (smoothImg[y * aw + xx] < thr) break;
+                right = xx;
+            }
+            return { wPx: right - left + 1, hPx: bot - top + 1 };
+        }
+
         /** |gray-bg| を ROI（＋1画素）で計算し、3x3 平均を smooth に書く */
         function computeSmoothDiff(gray) {
             for (let y = ey0; y < ey1; y++) {
@@ -292,9 +316,14 @@
             lastPt = { x: mx, y: my };
             updateBg(gray, thr);
 
+            const extent = blobExtent(smooth, thr, mx, my);
             return {
                 kind: 'point',
-                point: { x: mx, y: my, t, w: sw, n: fg, clipped },
+                point: {
+                    x: mx, y: my, t, w: sw, n: fg, clipped,
+                    sx: spreadX, sy: spreadY,
+                    wPx: extent.wPx, hPx: extent.hPx
+                },
                 thr,
                 fgFrac,
                 spreadX,
@@ -398,7 +427,10 @@
                     return false;
                 }
             }
-            pts.push({ x: p.x, y: p.y, t: p.t, w: p.w || 1, n: p.n || 0, clipped: !!p.clipped });
+            pts.push({
+                x: p.x, y: p.y, t: p.t, w: p.w || 1, n: p.n || 0, clipped: !!p.clipped,
+                sx: p.sx || 0, sy: p.sy || 0, wPx: p.wPx || 0, hPx: p.hPx || 0
+            });
             return true;
         }
 
@@ -509,7 +541,7 @@
 
             const endpoint = st.dist / st.dt;
             const pxPerSec = st.speed * 0.84 + endpoint * 0.16;
-            return { fracPerSec: pxPerSec / aw, points: use.length, stats: st, zones: z };
+            return { fracPerSec: pxPerSec / aw, points: use.length, stats: st, zones: z, samples: use };
         }
 
         return {
@@ -531,6 +563,80 @@
         return fracPerSec * totalDistM * visibleFrac * 3.6;
     }
 
+    /**
+     * センサー水平画角と、画面に実際に見えている幅の割合から、
+     * カメラから distanceM の位置での横幅（メートル）を求める。
+     */
+    function sceneWidthMeters(distanceM, fullHfovDeg, cropFrac) {
+        if (!(distanceM > 0) || !(fullHfovDeg > 0)) return 0;
+        const crop = clamp(cropFrac == null ? 1 : cropFrac, 0.05, 1);
+        const half = Math.tan((fullHfovDeg * Math.PI / 180) / 2) * crop;
+        return 2 * distanceM * half;
+    }
+
+    /** 進行方向と垂直な太さ。横に流れる球は高さ、縦に流れる物体は幅。 */
+    function minorAxisPx(p, vx, vy) {
+        const h = p.hPx || 0;
+        const w = p.wPx || 0;
+        if (h < 2 && w < 2) return 0;
+        return Math.abs(vx) >= Math.abs(vy) ? h : w;
+    }
+
+    /**
+     * スマホ1台での速度。
+     * 主: 既知の球径 ÷ 映った太さ。焦点距離も距離も相殺される。
+     * 副: カメラから球筋までの距離 × 見えている画角。球が小さすぎるときの予備。
+     * 3x3 平滑で太さが約 2px 太るので、その分を引く。
+     */
+    function solveSpeed(samples, opts) {
+        const o = opts || {};
+        const aw = o.frameWidth || 480;
+        const st = trackStats(samples || [], aw);
+        if (!st) return null;
+        const pad = 2;
+        const raw = [];
+        for (const p of samples) {
+            if (p.clipped) continue;
+            const d = minorAxisPx(p, st.vx, st.vy);
+            const corrected = d - pad;
+            if (corrected >= 2.5 && corrected <= 80) raw.push(corrected);
+        }
+        raw.sort((a, b) => a - b);
+        const mid = raw.length ? raw[(raw.length - 1) >> 1] : 0;
+        let spread = 1;
+        if (raw.length >= 2 && mid > 0) spread = (raw[raw.length - 1] - raw[0]) / mid;
+
+        let sizeKmh = null;
+        if (raw.length >= 2 && o.diameterM > 0 && mid >= 2.5 && spread <= 0.85) {
+            const pxPerSec = Math.abs(st.vx);
+            sizeKmh = pxPerSec * (o.diameterM / mid) * 3.6;
+        }
+
+        let distKmh = null;
+        if (o.sceneWidthM > 0) {
+            distKmh = (Math.abs(st.vx) / aw) * o.sceneWidthM * 3.6;
+        }
+
+        if (sizeKmh && distKmh && sizeKmh > 1) {
+            const rel = Math.abs(sizeKmh - distKmh) / sizeKmh;
+            if (rel <= 0.22) {
+                return {
+                    kmh: sizeKmh * 0.8 + distKmh * 0.2,
+                    method: 'size',
+                    diameterPx: mid,
+                    samples: raw.length
+                };
+            }
+        }
+        if (sizeKmh) {
+            return { kmh: sizeKmh, method: 'size', diameterPx: mid, samples: raw.length };
+        }
+        if (distKmh) {
+            return { kmh: distKmh, method: 'distance', diameterPx: mid, samples: raw.length };
+        }
+        return null;
+    }
+
     return {
         DETECTOR_DEFAULTS,
         TRACKER_DEFAULTS,
@@ -538,6 +644,8 @@
         createDetector,
         createTracker,
         trackStats,
-        toKmh
+        toKmh,
+        sceneWidthMeters,
+        solveSpeed
     };
 });

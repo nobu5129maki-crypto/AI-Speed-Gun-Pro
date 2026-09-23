@@ -1,5 +1,5 @@
 /* AI Speed Gun Pro — offline shell for installable PWA */
-const CACHE_VERSION = 'aispeedgun-v6.1';
+const CACHE_VERSION = 'aispeedgun-v6.2';
 const PRECACHE = [
   '/',
   '/index.html',
