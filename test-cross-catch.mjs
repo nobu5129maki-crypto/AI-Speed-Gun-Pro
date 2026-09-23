@@ -386,12 +386,42 @@ function measureBall({ radius, fromX, toX, frames, dt, diameterM }) {
     }
     const solved = hit && Core.solveSpeed(hit.samples, { diameterM: 0.074, sceneWidthM, frameWidth: AW });
     const pxPerSec = Math.abs(toX - fromX) / ((framesN - 1) * DT / 1000);
-    const expect = (pxPerSec / AW) * sceneWidthM * 3.6;
-    A('球でない物体は距離換算に落とす', !!(solved && solved.method === 'distance'), JSON.stringify(solved));
-    if (solved && solved.method === 'distance') {
+    // 縦に長い物体は、進行方向に垂直な長さではなく短い側（幅）を太さにする
+    const widthPx = solved ? solved.diameterPx : 16;
+    const expect = pxPerSec * (0.074 / widthPx) * 3.6;
+    A('細長い物体は短い側の太さで速度を出す', !!(solved && (solved.method === 'size' || solved.method === 'size-hi') && solved.diameterPx > 6 && solved.diameterPx < 28), JSON.stringify(solved));
+    if (solved && solved.method !== 'distance') {
         const err = Math.abs(solved.kmh - expect) / expect;
-        A('距離換算の速度が ±12% 以内', err < 0.12, `got=${solved.kmh.toFixed(1)} expect=${expect.toFixed(1)}`);
+        A('短い側換算の速度が ±12% 以内', err < 0.12, `got=${solved.kmh.toFixed(1)} expect=${expect.toFixed(1)} diam=${solved.diameterPx}`);
     }
+}
+
+{
+    // 指: 縦に長く、低コントラスト。球の縦幅として使うと 5km/h 未満で捨てられていた
+    const fromX = 60, toX = 420, framesN = 10;
+    const bg = makeNoiseBg(150, 8, 123);
+    const fr = crossing({
+        bg,
+        draw: (g, x) => drawRect(g, x - 7, cy - 40, 14, 80, 138),
+        fromX, toX, frames: framesN, noise: 2
+    });
+    const det = Core.createDetector({ aw: AW, ah: AH, roi: ROI });
+    const trk = Core.createTracker({ aw: AW, roiX0: GUIDE.x0, roiX1: GUIDE.x1 });
+    let hit = null;
+    for (let i = 0; i < fr.length; i++) {
+        const t = 1000 + i * (1000 / 30);
+        const r = det.feed(fr[i], t);
+        if (r.kind === 'point') trk.push(r.point);
+        else if (r.kind === 'global') trk.reset();
+        if (!hit && i > 3) {
+            const h = trk.evaluate(null, r.kind !== 'point');
+            if (h) hit = h;
+        }
+    }
+    const solved = hit && Core.solveSpeed(hit.samples, {
+        diameterM: 0.074, sceneWidthM: 2.8, frameWidth: AW, minKmh: 3, maxKmh: 180
+    });
+    A('低コントラストの指を計測する', !!(hit && solved && solved.kmh >= 3 && solved.kmh <= 180), JSON.stringify(solved));
 }
 
 // ---- カメラ解像度での半値幅（サブピクセル）------------------------------

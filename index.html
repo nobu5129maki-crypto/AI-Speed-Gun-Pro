@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - PRO FIELD v6.3.1</title>
+    <title>AIスピードガン プロ - PRO FIELD v6.3.2</title>
     <meta name="description" content="スマホで高精度に球速を測る AI Speed Gun Pro">
     <meta name="theme-color" content="#07140f">
     <meta name="mobile-web-app-capable" content="yes">
@@ -302,7 +302,7 @@
             <div class="flex items-start justify-between gap-3 px-0.5">
                 <div>
                     <div class="brand-mark">SPEED GUN</div>
-                    <div class="brand-sub">Pro Field v6.3.1</div>
+                    <div class="brand-sub">Pro Field v6.3.2</div>
                 </div>
                 <button id="settings-toggle" class="chip interactive" aria-expanded="false" aria-controls="settings-panel">
                     <span class="text-[var(--lime)] text-[10px] font-black">設定</span>
@@ -431,7 +431,7 @@
     const camDistInput = document.getElementById('cam-dist');
     const speedMethod = document.getElementById('speed-method');
 
-    // ---- PRO FIELD v6.3.1 -------------------------------------------------
+    // ---- PRO FIELD v6.3.2 -------------------------------------------------
     // 速度は球の実寸 ÷ カメラ解像度で測った太さ。距離は球が小さいときの予備。
     const FULL_HFOV_DEG = 68;
     // 検出コアは detector.js（背景モデル＋適応しきい値＋前景重心追跡）。
@@ -444,7 +444,7 @@
     const FRAME_Y1 = 0.665;
     const GUIDE_BORDER = 'rgba(200, 245, 66, 0.38)';
     const GUIDE_BORDER_ACTIVE = 'rgba(200, 245, 66, 0.9)';
-    const MIN_SPEED = 5;
+    const MIN_SPEED = 3;
     const MAX_SPEED = 180;
     const WARMUP_MS = 220;
     const UI_ACTIVATE_DX = 0.08;
@@ -815,10 +815,11 @@
         Core.toGray(rgba, gray);
         const hSrc = Core.profileWidth(gray, sw, sh, sx - x0, sy - y0, true);
         const wSrc = Core.profileWidth(gray, sw, sh, sx - x0, sy - y0, false);
-        // 速度は横方向の解析ピクセルで出る。縦の太さも同じ横スケールに直す。
-        // 縦横で縮尺が違う（縦長画面で横を切ったとき）に、ここを混ぜると速度が数倍ずれる。
-        if (hSrc > 0) point.diamY = hSrc * (AW / crop.w);
-        if (wSrc > 0) point.diamX = wSrc * (AH / crop.h);
+        // 速度は横方向の解析ピクセルで出る。縦の長さも横の太さも、同じ横スケールに直す。
+        // 指は縦に長いので短い側を太さに使う。縦横で縮尺が違うと、その比較と速度がずれる。
+        const xScale = AW / crop.w;
+        if (hSrc > 0) point.diamY = hSrc * xScale;
+        if (wSrc > 0) point.diamX = wSrc * xScale;
     }
 
     function measurementOptions() {
@@ -871,11 +872,15 @@
     function tryFire(settled) {
         const hit = tracker.evaluate(null, settled);
         if (!hit) return;
-        const solved = Core.solveSpeed(hit.samples, measurementOptions());
+        const solved = Core.solveSpeed(hit.samples, Object.assign(measurementOptions(), {
+            minKmh: MIN_SPEED,
+            maxKmh: MAX_SPEED
+        }));
         const kmh = solved ? solved.kmh : NaN;
         if (!solved || !isFinite(kmh) || kmh < MIN_SPEED || kmh > MAX_SPEED) return;
-        // 球径が測れるまでは確定しない。距離換算は球が枠を抜けたあとだけ使う。
-        if (solved.method !== 'size' && !settled) return;
+        // 距離換算は、枠を半分以上横切るか、物体が抜けてから確定する。
+        const crossed = tracker.spanFrac() >= 0.45;
+        if (solved.method === 'distance' && !settled && !crossed) return;
 
         fired = true;
         tracker.reset();

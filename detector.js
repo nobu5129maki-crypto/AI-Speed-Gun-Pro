@@ -645,13 +645,26 @@
         return span;
     }
 
-    /** 進行方向と垂直な太さ。精密測定（diamX/Y）があればそれを使う。 */
+    /** 縦または横の太さ。精密測定（diamX/Y）があればそれを使う。 */
+    function axisMeasure(p, vertical) {
+        const precise = vertical ? p.diamY : p.diamX;
+        if (precise > 1) return { px: precise, precise: true };
+        const coarse = vertical ? (p.hPx || 0) : (p.wPx || 0);
+        return { px: coarse, precise: false };
+    }
+
+    /**
+     * 速度に使う太さ。
+     * 球は進行方向と垂直な幅（ブラーで伸びた側は使わない）。
+     * 指のように垂直側がずっと長いときは、短い側が本当の太さ。
+     */
     function minorMeasure(p, vx, vy) {
         const horiz = Math.abs(vx) >= Math.abs(vy);
-        const precise = horiz ? p.diamY : p.diamX;
-        if (precise > 1) return { px: precise, precise: true };
-        const coarse = horiz ? (p.hPx || 0) : (p.wPx || 0);
-        return { px: coarse, precise: false };
+        const perp = axisMeasure(p, horiz);
+        const para = axisMeasure(p, !horiz);
+        if (perp.px > 0 && para.px > 0 && perp.px > para.px * 2.2) return para;
+        if (perp.px > 0) return perp;
+        return para;
     }
 
     /**
@@ -694,18 +707,25 @@
             distKmh = (Math.abs(st.vx) / aw) * o.sceneWidthM * 3.6;
         }
 
-        if (sizeKmh) {
-            return {
-                kmh: sizeKmh,
-                method: preciseCount >= 2 ? 'size-hi' : 'size',
-                diameterPx: mid,
-                samples: raw.length
-            };
-        }
-        if (distKmh) {
-            return { kmh: distKmh, method: 'distance', diameterPx: mid, samples: raw.length };
-        }
-        return null;
+        const sizeResult = sizeKmh ? {
+            kmh: sizeKmh,
+            method: preciseCount >= 2 ? 'size-hi' : 'size',
+            diameterPx: mid,
+            samples: raw.length
+        } : null;
+        const distResult = distKmh ? {
+            kmh: distKmh,
+            method: 'distance',
+            diameterPx: mid,
+            samples: raw.length
+        } : null;
+        const lo = o.minKmh;
+        const hi = o.maxKmh;
+        const inRange = (v) => v && (lo == null || v.kmh >= lo) && (hi == null || v.kmh <= hi);
+        // 球径換算が遅すぎ・速すぎるときは、設定した距離の換算が範囲内ならそちらを出す
+        if (inRange(sizeResult)) return sizeResult;
+        if (inRange(distResult)) return distResult;
+        return sizeResult || distResult;
     }
 
     return {
