@@ -650,6 +650,28 @@
         return span;
     }
 
+    /**
+     * 見える範囲を、画素が正方形のまま収める。
+     * 480x270 に引き伸ばすと、縦長画面の球が縦数ピクセルになって消える。
+     */
+    function fitAnalysisSize(cropW, cropH, maxSide) {
+        const max = maxSide || 640;
+        const w = Math.max(1, cropW);
+        const h = Math.max(1, cropH);
+        let aw;
+        let ah;
+        if (w >= h) {
+            aw = max;
+            ah = Math.round(max * h / w);
+        } else {
+            ah = max;
+            aw = Math.round(max * w / h);
+        }
+        aw = Math.max(192, aw - (aw % 2));
+        ah = Math.max(192, ah - (ah % 2));
+        return { aw, ah };
+    }
+
     /** 縦または横の太さ。精密測定（diamX/Y）があればそれを使う。 */
     function axisMeasure(p, vertical) {
         const precise = vertical ? p.diamY : p.diamX;
@@ -743,6 +765,7 @@
         toKmh,
         sceneWidthMeters,
         profileWidth,
+        fitAnalysisSize,
         solveSpeed
     };
 });

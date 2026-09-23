@@ -519,5 +519,56 @@ function diskGray(size, cx, cy, radius, bg, fg) {
     }
 }
 
+{
+    const fit = Core.fitAnalysisSize(500, 1080, 640);
+    const aspect = fit.ah / fit.aw;
+    A('縦長の解析画像が正方形画素を保つ', Math.abs(aspect - 1080 / 500) < 0.04, JSON.stringify(fit));
+    const ballSrc = 14;
+    const ballPx = ballSrc * (fit.aw / 500);
+    A('遠い球が解析画像で6px以上残る', ballPx >= 6, ballPx.toFixed(2));
+
+    const det = Core.createDetector({
+        aw: fit.aw, ah: fit.ah,
+        roi: { x0: 0.02, x1: 0.98, y0: 0.30, y1: 0.70 }
+    });
+    const trk = Core.createTracker({ aw: fit.aw, roiX0: 0.10, roiX1: 0.90 });
+    const cy = Math.round(fit.ah * 0.5);
+    const r = Math.max(4, Math.round(ballPx / 2));
+    const framesN = 6;
+    const fromX = Math.round(fit.aw * 0.18);
+    const toX = Math.round(fit.aw * 0.82);
+    let hit = null;
+    for (let i = 0; i < framesN; i++) {
+        const x = fromX + (toX - fromX) * (i / (framesN - 1));
+        const img = new Uint8ClampedArray(fit.aw * fit.ah * 4);
+        img.fill(40);
+        for (let yy = -r - 1; yy <= r + 1; yy++) {
+            for (let xx = -r - 1; xx <= r + 1; xx++) {
+                if (xx * xx + yy * yy > r * r) continue;
+                const px = Math.round(x + xx);
+                const py = cy + yy;
+                if (px < 0 || py < 0 || px >= fit.aw || py >= fit.ah) continue;
+                const o = (py * fit.aw + px) * 4;
+                img[o] = img[o + 1] = img[o + 2] = 230;
+            }
+        }
+        const gray = new Uint8Array(fit.aw * fit.ah);
+        Core.toGray(img, gray);
+        const res = det.feed(gray, i * (1000 / 60));
+        if (res.kind === 'point') trk.push(res.point);
+        if (i > 2) {
+            const h = trk.evaluate(null, res.kind !== 'point');
+            if (h) hit = h;
+        }
+    }
+    A('縦長・正方形画素の小さな球を検出する', !!hit, 'hitなし');
+    if (hit) {
+        const solved = Core.solveSpeed(hit.samples, {
+            diameterM: 0.074, sceneWidthM: 4.2, frameWidth: fit.aw, minKmh: 3, maxKmh: 180
+        });
+        A('小さな球の速度が範囲内', !!(solved && solved.kmh >= 3 && solved.kmh <= 180), JSON.stringify(solved));
+    }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
