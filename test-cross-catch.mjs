@@ -394,5 +394,51 @@ function measureBall({ radius, fromX, toX, frames, dt, diameterM }) {
     }
 }
 
+// ---- カメラ解像度での半値幅（サブピクセル）------------------------------
+function diskGray(size, cx, cy, radius, bg, fg) {
+    const g = new Uint8Array(size * size);
+    g.fill(bg);
+    const r2 = radius * radius;
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            if ((x - cx) ** 2 + (y - cy) ** 2 <= r2) g[y * size + x] = fg;
+        }
+    }
+    return g;
+}
+
+{
+    const radius = 18.5;
+    const g = diskGray(160, 80, 70, radius, 30, 220);
+    const h = Core.profileWidth(g, 160, 160, 80, 70, true);
+    const err = Math.abs(h - radius * 2) / (radius * 2);
+    A('半値幅が実直径の ±3% 以内', h > 0 && err < 0.03, `got=${h.toFixed(2)} expect=${(radius * 2).toFixed(2)}`);
+}
+
+{
+    // 解析座標では太さが約 4px でも、元画像の半値幅を換算すれば速度はずれない
+    const diameterM = 0.074;
+    const radiusSrc = 16;
+    const scale = 480 / 1920; // 元画像を解析幅へ縮めた比
+    const diamAnalysis = (radiusSrc * 2) * scale;
+    const fromX = 40, toX = 440, framesN = 10;
+    const pxPerSec = Math.abs(toX - fromX) / ((framesN - 1) * DT / 1000);
+    const expect = pxPerSec * (diameterM / diamAnalysis) * 3.6;
+    const samples = [];
+    for (let i = 0; i < framesN; i++) {
+        const x = fromX + (toX - fromX) * (i / (framesN - 1));
+        samples.push({
+            x, y: AH * 0.5, t: 1000 + i * DT, w: 20, n: 40,
+            diamY: diamAnalysis, diamX: diamAnalysis * 3, hPx: 8, wPx: 30
+        });
+    }
+    const solved = Core.solveSpeed(samples, { diameterM, sceneWidthM: 12, frameWidth: AW });
+    A('高解像の太さだけで速度を出す', !!(solved && solved.method === 'size-hi'), JSON.stringify(solved));
+    if (solved) {
+        const err = Math.abs(solved.kmh - expect) / expect;
+        A('高解像換算の速度が ±1% 以内', err < 0.01, `got=${solved.kmh.toFixed(2)} expect=${expect.toFixed(2)}`);
+    }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

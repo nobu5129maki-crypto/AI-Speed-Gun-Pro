@@ -429,7 +429,8 @@
             }
             pts.push({
                 x: p.x, y: p.y, t: p.t, w: p.w || 1, n: p.n || 0, clipped: !!p.clipped,
-                sx: p.sx || 0, sy: p.sy || 0, wPx: p.wPx || 0, hPx: p.hPx || 0
+                sx: p.sx || 0, sy: p.sy || 0, wPx: p.wPx || 0, hPx: p.hPx || 0,
+                diamX: p.diamX || 0, diamY: p.diamY || 0
             });
             return true;
         }
@@ -574,32 +575,108 @@
         return 2 * distanceM * half;
     }
 
-    /** 進行方向と垂直な太さ。横に流れる球は高さ、縦に流れる物体は幅。 */
-    function minorAxisPx(p, vx, vy) {
-        const h = p.hPx || 0;
-        const w = p.wPx || 0;
-        if (h < 2 && w < 2) return 0;
-        return Math.abs(vx) >= Math.abs(vy) ? h : w;
+    /**
+     * 半値幅。横移動の球は縦方向（vertical=true）の太さをサブピクセルで測る。
+     * カメラ解像度の切り出しに使う。戻り値はその画像のピクセル。
+     */
+    function profileWidth(gray, width, height, cx, cy, vertical) {
+        const samples = [];
+        if (vertical) {
+            const x = clamp(Math.round(cx), 0, width - 1);
+            const x0 = Math.max(0, x - 1);
+            const x1 = Math.min(width - 1, x + 1);
+            for (let y = 0; y < height; y++) {
+                let s = 0, n = 0;
+                for (let xx = x0; xx <= x1; xx++) { s += gray[y * width + xx]; n++; }
+                samples.push(s / n);
+            }
+            return halfMaxSpan(samples, cy);
+        }
+        const y = clamp(Math.round(cy), 0, height - 1);
+        const y0 = Math.max(0, y - 1);
+        const y1 = Math.min(height - 1, y + 1);
+        for (let x = 0; x < width; x++) {
+            let s = 0, n = 0;
+            for (let yy = y0; yy <= y1; yy++) { s += gray[yy * width + x]; n++; }
+            samples.push(s / n);
+        }
+        return halfMaxSpan(samples, cx);
+    }
+
+    function halfMaxSpan(samples, center) {
+        const n = samples.length;
+        if (n < 5) return 0;
+        const c = clamp(Math.round(center), 1, n - 2);
+        const i0 = Math.max(0, c - 48);
+        const i1 = Math.min(n - 1, c + 48);
+        const bg = (samples[i0] + samples[Math.min(n - 1, i0 + 1)] + samples[i1] + samples[Math.max(0, i1 - 1)]) / 4;
+        let peak = bg;
+        let peakI = c;
+        for (let i = i0; i <= i1; i++) {
+            if (Math.abs(samples[i] - bg) > Math.abs(peak - bg)) {
+                peak = samples[i];
+                peakI = i;
+            }
+        }
+        if (Math.abs(peak - bg) < 12) return 0;
+        const half = bg + (peak - bg) * 0.5;
+        let left = peakI;
+        for (let i = peakI; i > i0; i--) {
+            const a = samples[i];
+            const b = samples[i - 1];
+            if ((a - half) * (b - half) <= 0 && a !== b) {
+                left = (i - 1) + (half - b) / (a - b);
+                break;
+            }
+            left = i - 1;
+        }
+        let right = peakI;
+        for (let i = peakI; i < i1; i++) {
+            const a = samples[i];
+            const b = samples[i + 1];
+            if ((a - half) * (b - half) <= 0 && a !== b) {
+                right = i + (half - a) / (b - a);
+                break;
+            }
+            right = i + 1;
+        }
+        const span = right - left;
+        if (span < 1.5 || span > 96) return 0;
+        return span;
+    }
+
+    /** 進行方向と垂直な太さ。精密測定（diamX/Y）があればそれを使う。 */
+    function minorMeasure(p, vx, vy) {
+        const horiz = Math.abs(vx) >= Math.abs(vy);
+        const precise = horiz ? p.diamY : p.diamX;
+        if (precise > 1) return { px: precise, precise: true };
+        const coarse = horiz ? (p.hPx || 0) : (p.wPx || 0);
+        return { px: coarse, precise: false };
     }
 
     /**
      * スマホ1台での速度。
      * 主: 既知の球径 ÷ 映った太さ。焦点距離も距離も相殺される。
-     * 副: カメラから球筋までの距離 × 見えている画角。球が小さすぎるときの予備。
-     * 3x3 平滑で太さが約 2px 太るので、その分を引く。
+     * 精密な太さがあるときは、画角の見積もりとは混ぜない。
+     * 粗い太さだけのときは 3x3 平滑の 2px を引く。球が小さすぎるときだけ距離換算。
      */
     function solveSpeed(samples, opts) {
         const o = opts || {};
         const aw = o.frameWidth || 480;
         const st = trackStats(samples || [], aw);
         if (!st) return null;
-        const pad = 2;
         const raw = [];
+        let preciseCount = 0;
         for (const p of samples) {
             if (p.clipped) continue;
-            const d = minorAxisPx(p, st.vx, st.vy);
-            const corrected = d - pad;
-            if (corrected >= 2.5 && corrected <= 80) raw.push(corrected);
+            const m = minorMeasure(p, st.vx, st.vy);
+            const corrected = m.precise ? m.px : m.px - 2;
+            const minD = m.precise ? 1.2 : 2.5;
+            const maxD = m.precise ? 220 : 80;
+            if (corrected >= minD && corrected <= maxD) {
+                raw.push(corrected);
+                if (m.precise) preciseCount++;
+            }
         }
         raw.sort((a, b) => a - b);
         const mid = raw.length ? raw[(raw.length - 1) >> 1] : 0;
@@ -607,7 +684,7 @@
         if (raw.length >= 2 && mid > 0) spread = (raw[raw.length - 1] - raw[0]) / mid;
 
         let sizeKmh = null;
-        if (raw.length >= 2 && o.diameterM > 0 && mid >= 2.5 && spread <= 0.85) {
+        if (raw.length >= 2 && o.diameterM > 0 && mid >= 1.2 && spread <= 0.85) {
             const pxPerSec = Math.abs(st.vx);
             sizeKmh = pxPerSec * (o.diameterM / mid) * 3.6;
         }
@@ -617,19 +694,13 @@
             distKmh = (Math.abs(st.vx) / aw) * o.sceneWidthM * 3.6;
         }
 
-        if (sizeKmh && distKmh && sizeKmh > 1) {
-            const rel = Math.abs(sizeKmh - distKmh) / sizeKmh;
-            if (rel <= 0.22) {
-                return {
-                    kmh: sizeKmh * 0.8 + distKmh * 0.2,
-                    method: 'size',
-                    diameterPx: mid,
-                    samples: raw.length
-                };
-            }
-        }
         if (sizeKmh) {
-            return { kmh: sizeKmh, method: 'size', diameterPx: mid, samples: raw.length };
+            return {
+                kmh: sizeKmh,
+                method: preciseCount >= 2 ? 'size-hi' : 'size',
+                diameterPx: mid,
+                samples: raw.length
+            };
         }
         if (distKmh) {
             return { kmh: distKmh, method: 'distance', diameterPx: mid, samples: raw.length };
@@ -646,6 +717,7 @@
         trackStats,
         toKmh,
         sceneWidthMeters,
+        profileWidth,
         solveSpeed
     };
 });
