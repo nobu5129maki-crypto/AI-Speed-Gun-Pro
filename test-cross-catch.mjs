@@ -470,5 +470,54 @@ function diskGray(size, cx, cy, radius, bg, fg) {
     }
 }
 
+// 縦長スマホでは丸い球が横長の楕円になる。潰れた縦幅のまま割ると速度が上限を超えて消える。
+{
+    const rx = 36, ry = 8;
+    const fromX = 40, toX = 440, framesN = 8;
+    const yToX = 3.8;
+    const bg = makeNoiseBg(90, 10, 201);
+    const fr = crossing({
+        bg,
+        draw: (g, x) => {
+            for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) {
+                for (let xx = Math.floor(x - rx); xx <= Math.ceil(x + rx); xx++) {
+                    if (xx < 0 || xx >= AW || y < 0 || y >= AH) continue;
+                    const dx = (xx - x) / rx, dy = (y - cy) / ry;
+                    if (dx * dx + dy * dy <= 1) g[y * AW + xx] = 230;
+                }
+            }
+        },
+        fromX, toX, frames: framesN, noise: 2
+    });
+    const det = Core.createDetector({ aw: AW, ah: AH, roi: ROI });
+    const trk = Core.createTracker({ aw: AW, roiX0: GUIDE.x0, roiX1: GUIDE.x1 });
+    let hit = null;
+    for (let i = 0; i < fr.length; i++) {
+        const t = 1000 + i * (1000 / 30);
+        const r = det.feed(fr[i], t);
+        if (r.kind === 'point') trk.push(r.point);
+        else if (r.kind === 'global') trk.reset();
+        if (!hit && i > 3) {
+            const h = trk.evaluate(null, r.kind !== 'point');
+            if (h) hit = h;
+        }
+    }
+    A('縦長画面の横長の球を検出する', !!hit, 'hitなし');
+    if (hit) {
+        const scaled = hit.samples.map((p) => ({ ...p, hPx: p.hPx * yToX }));
+        const solved = Core.solveSpeed(scaled, {
+            diameterM: 0.074, sceneWidthM: 2.8, frameWidth: AW, minKmh: 3, maxKmh: 180
+        });
+        const pxPerSec = Math.abs(toX - fromX) / ((framesN - 1) / 30);
+        const thick = solved ? solved.diameterPx : 0;
+        const expect = pxPerSec * (0.074 / thick) * 3.6;
+        A('縦の太さを横スケールに直すと速度が出る', !!(solved && solved.kmh >= 3 && solved.kmh <= 180), JSON.stringify(solved));
+        if (solved && solved.method !== 'distance') {
+            const err = Math.abs(solved.kmh - expect) / expect;
+            A('直した太さの速度が ±15% 以内', err < 0.15 && thick > ry, `got=${solved.kmh.toFixed(1)} expect=${expect.toFixed(1)} diam=${thick}`);
+        }
+    }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

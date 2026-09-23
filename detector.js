@@ -53,7 +53,7 @@
         minSpan: 0.18,       // 最低横断距離（枠幅比）
         minDxFrac: 0.06,     // 最低横断距離（画面幅比）
         minStepFrac: 0.003,  // これ未満の移動は同一点扱い
-        maxJumpFrac: 0.65,   // 枠幅比。これ超のジャンプは別物体
+        maxJumpFrac: 0.85,   // 枠幅比。これ超のジャンプは別物体
         minDt: 0.012,
         maxDt: 1.4,
         twoPointMaxDt: 0.25, // 2点のみで確定できる最大時間（両ゾーン通過時）
@@ -61,7 +61,7 @@
         fastTwoPointMaxDt: 0.09, // 2 点の時間差がこれ以下
         fastTwoPointSpan: 0.20,  // 枠幅比でこれ以上移動
         fastTwoPointDyRatio: 0.35, // |dy| <= dx * 比
-        fastTwoPointSizeRatio: 3.0, // 前景サイズ比がこれ以下（同一物体）
+        fastTwoPointSizeRatio: 8.0, // 前景サイズ比がこれ以下（ブラーで大きさは変わる）
         minLinearity: 0.42,
         minDirection: 0.52,
         minHorizRatio: 0.38,
@@ -293,7 +293,12 @@
             const mx = sx / sw, my = sy / sw;
             const spreadX = Math.sqrt(Math.max(0, sxx / sw - mx * mx));
             const spreadY = Math.sqrt(Math.max(0, syy / sw - my * my));
-            if (spreadX > roiW * o.maxSpreadX || spreadY > roiH * o.maxSpreadY) {
+            const wideX = spreadX > roiW * o.maxSpreadX;
+            const wideY = spreadY > roiH * o.maxSpreadY;
+            // 縦長画面では丸い球が横長になる。進行方向のぼけも横に伸びる。
+            // 縦が細いままの一塊は球として残し、縦横とも散らばるものだけ捨てる。
+            const flatStreak = wideX && !wideY && spreadY < roiH * 0.22 && spreadX < roiW * 0.55;
+            if ((wideX || wideY) && !flatStreak) {
                 // 大きすぎる／散らばりすぎ（体・全体ずれ）: 背景をやや速めに追従
                 updateBg(gray, thr, o.bgAlpha * 0.5);
                 lastPt = null;
@@ -607,8 +612,8 @@
         const n = samples.length;
         if (n < 5) return 0;
         const c = clamp(Math.round(center), 1, n - 2);
-        const i0 = Math.max(0, c - 48);
-        const i1 = Math.min(n - 1, c + 48);
+        const i0 = Math.max(0, c - 110);
+        const i1 = Math.min(n - 1, c + 110);
         const bg = (samples[i0] + samples[Math.min(n - 1, i0 + 1)] + samples[i1] + samples[Math.max(0, i1 - 1)]) / 4;
         let peak = bg;
         let peakI = c;
@@ -641,7 +646,7 @@
             right = i + 1;
         }
         const span = right - left;
-        if (span < 1.5 || span > 96) return 0;
+        if (span < 1.5 || span > 200) return 0;
         return span;
     }
 

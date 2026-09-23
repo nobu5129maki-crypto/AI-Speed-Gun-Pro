@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - PRO FIELD v6.3.2</title>
+    <title>AIスピードガン プロ - PRO FIELD v6.3.3</title>
     <meta name="description" content="スマホで高精度に球速を測る AI Speed Gun Pro">
     <meta name="theme-color" content="#07140f">
     <meta name="mobile-web-app-capable" content="yes">
@@ -302,7 +302,7 @@
             <div class="flex items-start justify-between gap-3 px-0.5">
                 <div>
                     <div class="brand-mark">SPEED GUN</div>
-                    <div class="brand-sub">Pro Field v6.3.2</div>
+                    <div class="brand-sub">Pro Field v6.3.3</div>
                 </div>
                 <button id="settings-toggle" class="chip interactive" aria-expanded="false" aria-controls="settings-panel">
                     <span class="text-[var(--lime)] text-[10px] font-black">設定</span>
@@ -431,7 +431,7 @@
     const camDistInput = document.getElementById('cam-dist');
     const speedMethod = document.getElementById('speed-method');
 
-    // ---- PRO FIELD v6.3.2 -------------------------------------------------
+    // ---- PRO FIELD v6.3.3 -------------------------------------------------
     // 速度は球の実寸 ÷ カメラ解像度で測った太さ。距離は球が小さいときの予備。
     const FULL_HFOV_DEG = 68;
     // 検出コアは detector.js（背景モデル＋適応しきい値＋前景重心追跡）。
@@ -729,9 +729,13 @@
 
     function tick() {
         if (video.readyState < 2 || !video.videoWidth) return;
-        if (appState === 1) {
+        if (appState !== 1) return;
+        try {
             process();
             drawHud();
+        } catch (err) {
+            // 1フレームの切り出し失敗で計測ループを止めない
+            console.warn(err);
         }
     }
 
@@ -746,14 +750,15 @@
             return viewCrop;
         }
         const scale = Math.max(vw / vidW, vh / vidH);
-        const cropW = Math.min(vidW, vw / scale);
-        const cropH = Math.min(vidH, vh / scale);
-        viewCrop = {
-            x: (vidW - cropW) / 2,
-            y: (vidH - cropH) / 2,
-            w: cropW,
-            h: cropH
-        };
+        let cropW = Math.min(vidW, vw / scale);
+        let cropH = Math.min(vidH, vh / scale);
+        let x = (vidW - cropW) / 2;
+        let y = (vidH - cropH) / 2;
+        x = Math.max(0, Math.min(vidW - 1, x));
+        y = Math.max(0, Math.min(vidH - 1, y));
+        cropW = Math.max(1, Math.min(vidW - x, cropW));
+        cropH = Math.max(1, Math.min(vidH - y, cropH));
+        viewCrop = { x, y, w: cropW, h: cropH };
         return viewCrop;
     }
 
@@ -786,6 +791,16 @@
         return detector.feed(grayBuf, frameStampMs || performance.now());
     }
 
+    /**
+     * 解析画像は見える範囲を 480x270 に伸ばす。縦長画面では縦が強く潰れる。
+     * 縦の太さ（hPx）を、速度と同じ横方向のピクセルへ直す。
+     */
+    function verticalToSpeedPx(hPx) {
+        const crop = viewCrop;
+        if (!crop || !crop.w || !crop.h || !(hPx > 0)) return hPx || 0;
+        return hPx * (crop.h / AH) * (AW / crop.w);
+    }
+
     /** 検出点のまわりをカメラ解像度のまま切り、球の太さをサブピクセルで測る */
     function refineDiameter(point) {
         const src = frameSource || video;
@@ -795,7 +810,7 @@
         if (!srcW || !srcH || !crop || !crop.w || !crop.h) return;
         const sx = crop.x + (point.x / AW) * crop.w;
         const sy = crop.y + (point.y / AH) * crop.h;
-        const win = 72;
+        const win = 140;
         const x0 = Math.max(0, Math.floor(sx - win));
         const y0 = Math.max(0, Math.floor(sy - win));
         const sw = Math.min(srcW - x0, win * 2);
@@ -841,6 +856,7 @@
         lastResult = res;
 
         if (res && res.kind === 'point') {
+            res.point.hPx = verticalToSpeedPx(res.point.hPx);
             refineDiameter(res.point);
             if (tracker.push(res.point)) lastPointAt = performance.now();
         } else if (res && res.kind === 'global') {
