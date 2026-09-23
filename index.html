@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - TRACK v7.0</title>
+    <title>AIスピードガン プロ - TRACK v7.1</title>
     <meta name="description" content="スマホで高精度に球速を測る AI Speed Gun Pro">
     <meta name="theme-color" content="#07140f">
     <meta name="mobile-web-app-capable" content="yes">
@@ -90,7 +90,6 @@
             color: var(--lime);
             border-color: rgba(200, 245, 66, 0.45);
         }
-        #reanalyze-btn:disabled { opacity: 0.4; }
         .track-sheet {
             width: min(100%, 28rem);
             margin: 0 auto;
@@ -238,65 +237,10 @@
             margin-top: 0;
         }
         .settings-panel.open {
-            max-height: 460px;
+            max-height: 220px;
             opacity: 1;
             margin-top: 0.55rem;
             overflow-y: auto;
-        }
-        .path-note {
-            margin-top: 0.45rem;
-            font-size: 11px;
-            line-height: 1.55;
-            font-weight: 700;
-            color: rgba(255,255,255,0.72);
-        }
-        .path-diagram {
-            margin-top: 0.55rem;
-            display: grid;
-            grid-template-columns: auto 1fr auto;
-            align-items: center;
-            gap: 0.35rem;
-            padding: 0.45rem 0.5rem;
-            border-radius: 0.7rem;
-            background: rgba(0,0,0,0.28);
-            border: 1px solid rgba(200, 245, 66, 0.18);
-        }
-        .path-diagram .who,
-        .path-diagram .lane {
-            font-size: 10px;
-            font-weight: 800;
-            line-height: 1.25;
-            color: #fff;
-        }
-        .path-diagram .who span,
-        .path-diagram .lane span {
-            display: block;
-            color: rgba(255,255,255,0.45);
-            font-size: 9px;
-            font-weight: 700;
-        }
-        .path-meter {
-            position: relative;
-            height: 28px;
-        }
-        .path-meter::before {
-            content: '';
-            position: absolute;
-            left: 0;
-            right: 0;
-            top: 16px;
-            border-top: 2px dashed var(--lime);
-        }
-        .path-meter i {
-            position: absolute;
-            left: 0;
-            right: 0;
-            top: 0;
-            text-align: center;
-            font-style: normal;
-            font-size: 10px;
-            font-weight: 800;
-            color: var(--lime);
         }
 
         .modal-bg {
@@ -311,9 +255,6 @@
             pointer-events: auto;
         }
 
-        #cam-dist::-webkit-outer-spin-button,
-        #cam-dist::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        #cam-dist[type=number] { -moz-appearance: textfield; }
         #ball-type { -webkit-appearance: none; appearance: none; }
 
         @keyframes brandIn {
@@ -353,11 +294,11 @@
             <div class="flex items-start justify-between gap-3 px-0.5">
                 <div>
                     <div class="brand-mark">SPEED GUN</div>
-                    <div class="brand-sub">Track v7.0</div>
+                    <div class="brand-sub">Track v7.1</div>
                 </div>
                 <button id="settings-toggle" class="chip interactive" aria-expanded="false" aria-controls="settings-panel">
                     <span class="text-[var(--lime)] text-[10px] font-black">設定</span>
-                    <span>球種 / 距離</span>
+                    <span>球種</span>
                 </button>
             </div>
 
@@ -370,21 +311,6 @@
                         <option value="0.068">軟式J号 68mm</option>
                         <option value="0.097">ソフトボール 97mm</option>
                     </select>
-                </div>
-                <div class="mt-2.5">
-                    <div class="flex flex-wrap items-center gap-x-2 gap-y-2">
-                        <label for="cam-dist" class="text-[11px] text-white/70 font-bold">スマホから球の通り道まで</label>
-                        <div class="flex items-center gap-1">
-                            <input type="number" id="cam-dist" value="8" min="1" max="40" step="0.1" aria-label="スマホから、球が飛んでいく線までの直角の距離（メートル）" class="bg-white/10 text-sm font-extrabold w-[4.75rem] py-1.5 px-2 text-center text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] min-h-[34px]">
-                            <span class="text-xs text-white/45 font-bold">m</span>
-                        </div>
-                    </div>
-                    <p class="path-note">横に立って、スマホから球が飛んでいく線までを直角に測った長さです。通り道の横が8mなら「8」。ピッチャーからホームまでの距離ではありません。</p>
-                    <div class="path-diagram" aria-hidden="true">
-                        <div class="who">スマホ<span>横から</span></div>
-                        <div class="path-meter"><i>この長さ</i></div>
-                        <div class="lane">球 →<span>通り道</span></div>
-                    </div>
                 </div>
             </div>
 
@@ -429,9 +355,6 @@
                     <span class="bg-[var(--lime)] text-black text-[9px] px-1 rounded font-black">APP</span>
                     <span>ホーム画面に追加</span>
                 </button>
-                <button id="log-btn" class="chip interactive">記録</button>
-                <button id="reanalyze-btn" class="chip interactive" disabled>直前を再解析</button>
-                <button id="share-btn" class="chip interactive hidden">共有</button>
                 <span id="level-pill" class="chip">水平</span>
             </div>
 
@@ -454,23 +377,12 @@
         <h2 class="font-['Bebas_Neue'] text-[1.8rem] text-[var(--lime)] tracking-wide mb-3">高精度のコツ</h2>
         <ul class="space-y-3.5 text-sm font-bold text-white/90 leading-relaxed">
             <li><span class="text-[var(--lime)]">01</span> 球種を選ぶ。映った球の太さから速度を計算します</li>
-            <li><span class="text-[var(--lime)]">02</span> スマホから球の通り道までを、直角にメジャーで測る。マウンドからホームの距離ではない</li>
-            <li><span class="text-[var(--lime)]">03</span> スマホは固定。手ブレは誤検知の主因</li>
-            <li><span class="text-[var(--lime)]">04</span> ガイド枠を左→右（または右→左）へしっかり横切る</li>
-            <li><span class="text-[var(--lime)]">05</span> 速球は明るい場所で。計測中の「fps」表示が 60 だと最も正確</li>
-            <li><span class="text-[var(--lime)]">06</span> 計測後、速度軌道に球筋と初速・終速が出ます。拾えなければ「直前を再解析」</li>
+            <li><span class="text-[var(--lime)]">02</span> スマホは固定。手ブレは誤検知の主因</li>
+            <li><span class="text-[var(--lime)]">03</span> ガイド枠を左→右（または右→左）へしっかり横切る</li>
+            <li><span class="text-[var(--lime)]">04</span> 速球は明るい場所で。計測中の「fps」表示が 60 だと最も正確</li>
+            <li><span class="text-[var(--lime)]">05</span> 計測後、速度軌道に球筋と初速・終速が出ます</li>
         </ul>
         <button id="close-modal" class="w-full mt-6 bg-[var(--lime)] text-black font-black py-3 rounded-2xl text-xs tracking-wide">閉じる</button>
-    </div>
-</div>
-
-<div id="log-modal" class="modal-bg">
-    <div class="bg-[#0b1a14] border border-[rgba(200,245,66,0.2)] rounded-3xl p-6 w-full max-w-sm max-h-[80vh] overflow-y-auto">
-        <h2 class="font-['Bebas_Neue'] text-[1.8rem] text-[var(--lime)] tracking-wide mb-2">投球記録</h2>
-        <label for="pitch-note" class="text-[11px] text-white/70 font-bold">メモ（球種・投手・調子）</label>
-        <input id="pitch-note" maxlength="80" placeholder="例: 直球 田中" class="mt-1 mb-3 w-full bg-white/10 text-sm font-bold text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] py-2.5 px-2">
-        <ul id="pitch-log" class="space-y-2 text-sm font-bold text-white/90"></ul>
-        <button id="close-log-modal" class="w-full mt-6 bg-[var(--lime)] text-black font-black py-3 rounded-2xl text-xs tracking-wide">閉じる</button>
     </div>
 </div>
 
@@ -499,10 +411,9 @@
     const guideProgL = document.getElementById('guide-progress-left');
     const guideProgR = document.getElementById('guide-progress-right');
     const ballType = document.getElementById('ball-type');
-    const camDistInput = document.getElementById('cam-dist');
     const speedMethod = document.getElementById('speed-method');
 
-    // ---- TRACK v7.0 -------------------------------------------------
+    // ---- TRACK v7.1 -------------------------------------------------
     // 速度は球の実寸 ÷ カメラ解像度で測った太さ。距離は球が小さいときの予備。
     const FULL_HFOV_DEG = 68;
     // 検出コアは detector.js（背景モデル＋適応しきい値＋前景重心追跡）。
@@ -522,7 +433,8 @@
     const FIRE_SPAN = 0.75;        // 枠幅のこの割合を横断したら確定してよい
     const FIRE_MAX_WAIT_MS = 350;  // 遅い物体はこの時間で確定
     const SETTINGS_KEY = 'aispeedgun.pro.v62.settings';
-    const LOG_KEY = 'aispeedgun.pro.v64.log';
+    // 太さが測れないときだけ使う予備距離。画面では聞かない。
+    const FALLBACK_DISTANCE_M = 8;
     const DEBUG = /[?&]debug=1/.test(location.search);
 
     let appState = 0;
@@ -551,10 +463,6 @@
     let frameStampMs = 0; // RVFC / rAF のフレーム提示時刻
     let frameSource = null; // テスト用: video の代わりに解析する描画ソース
     let pathLocked = false;
-    let reanalyzing = false;
-    let lastReport = null;
-    const frameRing = [];
-    const RING_MAX = 40;
     const pathCanvas = document.getElementById('path-layer');
     const pathCtx = pathCanvas.getContext('2d');
     const trackCanvas = document.getElementById('track-canvas');
@@ -562,12 +470,6 @@
     const speedSplit = document.getElementById('speed-split');
     const v0Display = document.getElementById('v0-display');
     const v1Display = document.getElementById('v1-display');
-    const reanalyzeBtn = document.getElementById('reanalyze-btn');
-    const shareBtn = document.getElementById('share-btn');
-    const logBtn = document.getElementById('log-btn');
-    const logModal = document.getElementById('log-modal');
-    const pitchNote = document.getElementById('pitch-note');
-    const pitchLog = document.getElementById('pitch-log');
     const levelPill = document.getElementById('level-pill');
     const debugLine = document.getElementById('debug-line');
     if (DEBUG && debugLine) debugLine.classList.remove('hidden');
@@ -584,12 +486,6 @@
                 sheet.classList.add('hidden');
                 sheet.setAttribute('aria-hidden', 'true');
             }
-        }
-        if (state === 1) {
-            frameRing.length = 0;
-            lastReport = null;
-            if (shareBtn) shareBtn.classList.add('hidden');
-            if (reanalyzeBtn) reanalyzeBtn.disabled = true;
         }
         if (state === 0) {
             mainBtn.innerText = '計測スタート';
@@ -650,15 +546,11 @@
             if (data.ball != null && ballType.querySelector(`option[value="${data.ball}"]`)) {
                 ballType.value = String(data.ball);
             }
-            if (data.cam != null && Number.isFinite(+data.cam)) camDistInput.value = String(data.cam);
         } catch (_) { /* ignore */ }
     }
     function saveSettings() {
         try {
-            localStorage.setItem(SETTINGS_KEY, JSON.stringify({
-                ball: ballType.value,
-                cam: parseFloat(camDistInput.value) || 8
-            }));
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ball: ballType.value }));
         } catch (_) { /* ignore */ }
     }
 
@@ -832,7 +724,6 @@
     }
 
     function tick() {
-        if (reanalyzing) return;
         if (video.readyState < 2 || !video.videoWidth) return;
         if (appState !== 1) return;
         try {
@@ -910,9 +801,7 @@
         analysisCtx.drawImage(frameSource || video, crop.x, crop.y, crop.w, crop.h, 0, 0, AW, AH);
         const rgba = analysisCtx.getImageData(0, 0, AW, AH).data;
         Core.toGray(rgba, grayBuf);
-        const t = frameStampMs || performance.now();
-        rememberFrame(t);
-        return detector.feed(grayBuf, t);
+        return detector.feed(grayBuf, frameStampMs || performance.now());
     }
 
     /**
@@ -963,7 +852,7 @@
 
     function measurementOptions() {
         const diameterM = parseFloat(ballType.value) || 0.074;
-        const distanceM = parseFloat(camDistInput.value) || 8;
+        const distanceM = FALLBACK_DISTANCE_M;
         const crop = updateViewCrop();
         const vidW = (frameSource && frameSource.width) || video.videoWidth || crop.w || 1;
         const cropFrac = Math.max(0.05, Math.min(1, crop.w / vidW));
@@ -973,13 +862,6 @@
             frameWidth: AW,
             frameHeight: AH
         };
-    }
-
-    function rememberFrame(t) {
-        if (appState !== 1 || reanalyzing || !grayBuf || !grayBuf.length) return;
-        frameRing.push({ t, gray: grayBuf.slice(), aw: AW, ah: AH });
-        if (frameRing.length > RING_MAX) frameRing.shift();
-        if (reanalyzeBtn) reanalyzeBtn.disabled = frameRing.length < 8;
     }
 
     function clearPath() {
@@ -1168,7 +1050,6 @@
 
     function showMeasurement(speed, method, report) {
         if (appState !== 1 && appState !== 2) return;
-        lastReport = { speed, method, report };
         pathLocked = true;
         speedDisplay.classList.remove('pop');
         void speedDisplay.offsetWidth;
@@ -1195,122 +1076,12 @@
             maxSpeed = speed;
             maxSpeedDisplay.innerText = maxSpeed.toFixed(1);
         }
-        savePitch(speed, method, report);
-        if (shareBtn) shareBtn.classList.remove('hidden');
         if (navigator.vibrate && appState === 1) {
             try { navigator.vibrate(28); } catch (_) { /* ignore */ }
         }
         if (appState === 1) setAppState(2);
     }
 
-    function loadLog() {
-        try { return JSON.parse(localStorage.getItem(LOG_KEY)) || []; }
-        catch (_) { return []; }
-    }
-    function saveLog(list) {
-        try { localStorage.setItem(LOG_KEY, JSON.stringify(list.slice(0, 30))); }
-        catch (_) { /* 容量不足は記録だけ諦める */ }
-    }
-    function savePitch(speed, method, report) {
-        const ball = ballType.options[ballType.selectedIndex];
-        const list = loadLog();
-        list.unshift({
-            id: Date.now(),
-            at: new Date().toISOString(),
-            kmh: speed,
-            v0: report ? Math.round(report.v0 * 10) / 10 : speed,
-            v1: report ? Math.round(report.v1 * 10) / 10 : speed,
-            method: method === 'distance' ? '距離' : '球径',
-            ball: ball ? ball.text : '',
-            dist: camDistInput.value,
-            note: ''
-        });
-        saveLog(list);
-        if (pitchNote) pitchNote.value = '';
-    }
-    function esc(s) {
-        return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    }
-    function renderLog() {
-        const list = loadLog();
-        if (!list.length) {
-            pitchLog.innerHTML = '<li class="text-white/50">まだ記録がありません</li>';
-            return;
-        }
-        pitchLog.innerHTML = list.map((row) => {
-            const when = new Date(row.at);
-            const hh = String(when.getHours()).padStart(2, '0');
-            const mm = String(when.getMinutes()).padStart(2, '0');
-            const note = row.note ? ' · ' + esc(row.note) : '';
-            return '<li class="bg-white/5 rounded-xl px-3 py-2">'
-                + hh + ':' + mm + '  <span class="text-[var(--lime)]">' + Number(row.kmh).toFixed(1) + '</span> km/h'
-                + '  初' + Number(row.v0).toFixed(1) + ' 終' + Number(row.v1).toFixed(1)
-                + '<span class="block text-[11px] text-white/45 font-bold">' + esc(row.ball) + ' ' + esc(row.dist) + 'm ' + esc(row.method) + note + '</span></li>';
-        }).join('');
-    }
-    function shareLatest() {
-        const row = lastReport
-            ? {
-                kmh: lastReport.speed,
-                v0: lastReport.report ? lastReport.report.v0 : lastReport.speed,
-                v1: lastReport.report ? lastReport.report.v1 : lastReport.speed,
-                method: lastReport.method === 'distance' ? '距離' : '球径'
-            }
-            : loadLog()[0];
-        if (!row) return;
-        const note = pitchNote && pitchNote.value ? ' ' + pitchNote.value : (row.note ? ' ' + row.note : '');
-        const text = '球速 ' + Number(row.kmh).toFixed(1) + ' km/h（初速 ' + Number(row.v0).toFixed(1) + ' / 終速 ' + Number(row.v1).toFixed(1) + '・' + (row.method || '') + '）' + note;
-        if (navigator.share) {
-            navigator.share({ title: 'AIスピードガン', text }).catch(() => {});
-            return;
-        }
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(text).then(() => { statusBadge.innerText = 'コピーしました'; }).catch(() => {});
-        }
-    }
-    function reanalyze() {
-        const frames = frameRing.filter((f) => f.aw === AW && f.ah === AH && f.gray && f.gray.length === AW * AH);
-        if (frames.length < 8) {
-            statusBadge.innerText = '直前の映像が足りません';
-            return;
-        }
-        const was = appState;
-        reanalyzing = true;
-        try {
-            const det = Core.createDetector({ aw: AW, ah: AH, roi: { x0: DETECT_X0, x1: DETECT_X1, y0: DETECT_Y0, y1: DETECT_Y1 } });
-            const trk = Core.createTracker({ aw: AW, roiX0: FRAME_X0, roiX1: FRAME_X1 });
-            let hit = null;
-            for (let i = 0; i < frames.length; i++) {
-                const res = det.feed(frames[i].gray, frames[i].t || (i * 33));
-                if (res.kind === 'point') trk.push(res.point);
-                else if (res.kind === 'global') trk.reset();
-                if (i > 3) {
-                    const h = trk.evaluate(null, res.kind !== 'point');
-                    if (h) hit = h;
-                }
-            }
-            if (!hit) hit = trk.evaluate(null, true);
-            if (!hit) {
-                statusBadge.innerText = '軌道を拾えませんでした';
-                return;
-            }
-            if (appState !== 1) appState = 1;
-            fired = false;
-            const opts = Object.assign(measurementOptions(), { minKmh: MIN_SPEED, maxKmh: MAX_SPEED });
-            const solved = Core.solveSpeed(hit.samples, opts);
-            const kmh = solved ? solved.kmh : NaN;
-            if (!solved || !isFinite(kmh) || kmh < MIN_SPEED || kmh > MAX_SPEED) {
-                appState = was;
-                statusBadge.innerText = '速度が範囲外でした';
-                return;
-            }
-            const report = Core.pathReport(hit.samples, opts);
-            showMeasurement(Math.round(kmh * 10) / 10, solved.method, report);
-            statusBadge.innerText = '再解析で計測完了';
-        } finally {
-            reanalyzing = false;
-        }
-    }
     function onOrient(e) {
         if (e.gamma == null || !levelPill) return;
         const tilt = Math.abs(e.gamma);
@@ -1335,22 +1106,6 @@
         if (!video.srcObject) await startCamera();
         if (appState === 0 || appState === 2) setAppState(1);
     };
-    reanalyzeBtn.onclick = () => reanalyze();
-    logBtn.onclick = () => {
-        const list = loadLog();
-        if (pitchNote) pitchNote.value = list[0] && list[0].note ? list[0].note : '';
-        renderLog();
-        logModal.style.display = 'flex';
-    };
-    document.getElementById('close-log-modal').onclick = () => { logModal.style.display = 'none'; };
-    pitchNote.addEventListener('change', () => {
-        const list = loadLog();
-        if (!list[0]) return;
-        list[0].note = pitchNote.value.slice(0, 80);
-        saveLog(list);
-        renderLog();
-    });
-    shareBtn.onclick = () => shareLatest();
     stopBtn.onclick = () => setAppState(0);
     document.getElementById('reset-max').onclick = () => {
         maxSpeed = 0;
@@ -1368,7 +1123,6 @@
         else openSettings();
     };
     ballType.addEventListener('change', saveSettings);
-    camDistInput.addEventListener('change', saveSettings);
     window.onload = () => {
         document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
         loadSettings();
