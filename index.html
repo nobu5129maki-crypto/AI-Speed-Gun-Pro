@@ -186,9 +186,65 @@
             margin-top: 0;
         }
         .settings-panel.open {
-            max-height: 280px;
+            max-height: 460px;
             opacity: 1;
             margin-top: 0.55rem;
+            overflow-y: auto;
+        }
+        .path-note {
+            margin-top: 0.45rem;
+            font-size: 11px;
+            line-height: 1.55;
+            font-weight: 700;
+            color: rgba(255,255,255,0.72);
+        }
+        .path-diagram {
+            margin-top: 0.55rem;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.45rem 0.5rem;
+            border-radius: 0.7rem;
+            background: rgba(0,0,0,0.28);
+            border: 1px solid rgba(200, 245, 66, 0.18);
+        }
+        .path-diagram .who,
+        .path-diagram .lane {
+            font-size: 10px;
+            font-weight: 800;
+            line-height: 1.25;
+            color: #fff;
+        }
+        .path-diagram .who span,
+        .path-diagram .lane span {
+            display: block;
+            color: rgba(255,255,255,0.45);
+            font-size: 9px;
+            font-weight: 700;
+        }
+        .path-meter {
+            position: relative;
+            height: 28px;
+        }
+        .path-meter::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 16px;
+            border-top: 2px dashed var(--lime);
+        }
+        .path-meter i {
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 0;
+            text-align: center;
+            font-style: normal;
+            font-size: 10px;
+            font-weight: 800;
+            color: var(--lime);
         }
 
         .modal-bg {
@@ -263,11 +319,19 @@
                         <option value="0.097">ソフトボール 97mm</option>
                     </select>
                 </div>
-                <div class="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-2">
-                    <label for="cam-dist" class="text-[11px] text-white/70 font-bold">カメラから球筋まで</label>
-                    <div class="flex items-center gap-1">
-                        <input type="number" id="cam-dist" value="8" min="1" max="40" step="0.1" aria-label="カメラから球筋までの距離（メートル）" class="bg-white/10 text-sm font-extrabold w-[4.75rem] py-1.5 px-2 text-center text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] min-h-[34px]">
-                        <span class="text-xs text-white/45 font-bold">m</span>
+                <div class="mt-2.5">
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-2">
+                        <label for="cam-dist" class="text-[11px] text-white/70 font-bold">スマホから球の通り道まで</label>
+                        <div class="flex items-center gap-1">
+                            <input type="number" id="cam-dist" value="8" min="1" max="40" step="0.1" aria-label="スマホから、球が飛んでいく線までの直角の距離（メートル）" class="bg-white/10 text-sm font-extrabold w-[4.75rem] py-1.5 px-2 text-center text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] min-h-[34px]">
+                            <span class="text-xs text-white/45 font-bold">m</span>
+                        </div>
+                    </div>
+                    <p class="path-note">横に立って、スマホから球が飛んでいく線までを直角に測った長さです。通り道の横が8mなら「8」。ピッチャーからホームまでの距離ではありません。</p>
+                    <div class="path-diagram" aria-hidden="true">
+                        <div class="who">スマホ<span>横から</span></div>
+                        <div class="path-meter"><i>この長さ</i></div>
+                        <div class="lane">球 →<span>通り道</span></div>
                     </div>
                 </div>
             </div>
@@ -328,7 +392,7 @@
         <h2 class="font-['Bebas_Neue'] text-[1.8rem] text-[var(--lime)] tracking-wide mb-3">高精度のコツ</h2>
         <ul class="space-y-3.5 text-sm font-bold text-white/90 leading-relaxed">
             <li><span class="text-[var(--lime)]">01</span> 球種を選ぶ。映った球の太さから速度を計算します</li>
-            <li><span class="text-[var(--lime)]">02</span> スマホから球筋までの直角距離をメジャーで測る</li>
+            <li><span class="text-[var(--lime)]">02</span> スマホから球の通り道までを、直角にメジャーで測る。マウンドからホームの距離ではない</li>
             <li><span class="text-[var(--lime)]">03</span> スマホは固定。手ブレは誤検知の主因</li>
             <li><span class="text-[var(--lime)]">04</span> ガイド枠を左→右（または右→左）へしっかり横切る</li>
             <li><span class="text-[var(--lime)]">05</span> 速球は明るい場所で。計測中の「fps」表示が 60 だと最も正確</li>
