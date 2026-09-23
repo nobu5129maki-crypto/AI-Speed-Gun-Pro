@@ -830,6 +830,50 @@
         return sizeResult || distResult;
     }
 
+    /**
+     * 軌道全体の速度と、入りと終わりの速度。
+     * 全体は solveSpeed（点列全体の傾き）。初速・終速は同じ換算で区間速度を見る。
+     * 点が少ない速球は全体と同じ値にする。
+     */
+    function pathReport(samples, opts) {
+        const o = opts || {};
+        const list = (samples || []).filter((p) => p && isFinite(p.x) && isFinite(p.t));
+        const overall = solveSpeed(list, o);
+        if (!overall) return null;
+        const aw = o.frameWidth || 480;
+        const ah = o.frameHeight || 1;
+        const st = trackStats(list, aw);
+        const scale = st && Math.abs(st.vx) > 1 ? overall.kmh / Math.abs(st.vx) : 0;
+        const seg = [];
+        if (scale > 0) {
+            for (let i = 1; i < list.length; i++) {
+                const dt = (list[i].t - list[i - 1].t) / 1000;
+                if (dt <= 0.004) continue;
+                const vx = (list[i].x - list[i - 1].x) / dt;
+                const kmh = Math.abs(vx) * scale;
+                if (kmh >= overall.kmh * 0.45 && kmh <= overall.kmh * 1.8) seg.push(kmh);
+            }
+        }
+        const v0 = seg.length ? seg[0] : overall.kmh;
+        const v1 = seg.length ? seg[seg.length - 1] : overall.kmh;
+        const points = list.map((p, i) => {
+            const u = list.length <= 1 ? 0 : i / (list.length - 1);
+            return {
+                x: aw > 0 ? p.x / aw : 0,
+                y: ah > 0 ? p.y / ah : 0,
+                kmh: v0 + (v1 - v0) * u
+            };
+        });
+        return {
+            kmh: overall.kmh,
+            method: overall.method,
+            v0,
+            v1,
+            delta: v1 - v0,
+            points
+        };
+    }
+
     return {
         DETECTOR_DEFAULTS,
         TRACKER_DEFAULTS,
@@ -841,6 +885,7 @@
         sceneWidthMeters,
         profileWidth,
         fitAnalysisSize,
-        solveSpeed
+        solveSpeed,
+        pathReport
     };
 });

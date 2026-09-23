@@ -619,5 +619,27 @@ function diskGray(size, cx, cy, radius, bg, fg) {
     }
 }
 
+{
+    const opts = { diameterM: 0.074, sceneWidthM: 3, frameWidth: 480, frameHeight: 270, minKmh: 3, maxKmh: 180 };
+    const flat = [];
+    for (let i = 0; i < 6; i++) {
+        flat.push({ x: 40 + i * 28, y: 135, t: i * 20, diamX: 12, diamY: 12, hPx: 12, wPx: 12, clipped: false });
+    }
+    const even = Core.pathReport(flat, opts);
+    A('等速の軌道は初速と終速が揃う', !!(even && Math.abs(even.v0 - even.v1) < 0.6 && even.points.length === 6), JSON.stringify(even && { v0: even.v0, v1: even.v1 }));
+
+    const slow = [];
+    let x = 30;
+    let vx = 420;
+    for (let i = 0; i < 8; i++) {
+        slow.push({ x, y: 135, t: i * 16.7, diamX: 12, diamY: 12, hPx: 12, wPx: 12, clipped: false });
+        x += vx * 0.0167;
+        vx *= 0.9;
+    }
+    const decel = Core.pathReport(slow, opts);
+    A('減速する軌道は初速が終速より大きい', !!(decel && decel.v0 > decel.v1 + 1), JSON.stringify(decel && { v0: decel.v0, v1: decel.v1, kmh: decel.kmh }));
+    A('軌道の点は画面の割合で返す', !!(decel && decel.points.every((p) => p.x >= 0 && p.x <= 1.2 && p.y > 0 && p.y < 1)), '');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
