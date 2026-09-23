@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - TRACK v7.1</title>
+    <title>AIスピードガン プロ - TRACK v7.2</title>
     <meta name="description" content="スマホで高精度に球速を測る AI Speed Gun Pro">
     <meta name="theme-color" content="#07140f">
     <meta name="mobile-web-app-capable" content="yes">
@@ -237,7 +237,7 @@
             margin-top: 0;
         }
         .settings-panel.open {
-            max-height: 220px;
+            max-height: 280px;
             opacity: 1;
             margin-top: 0.55rem;
             overflow-y: auto;
@@ -294,7 +294,7 @@
             <div class="flex items-start justify-between gap-3 px-0.5">
                 <div>
                     <div class="brand-mark">SPEED GUN</div>
-                    <div class="brand-sub">Track v7.1</div>
+                    <div class="brand-sub">Track v7.2</div>
                 </div>
                 <button id="settings-toggle" class="chip interactive" aria-expanded="false" aria-controls="settings-panel">
                     <span class="text-[var(--lime)] text-[10px] font-black">設定</span>
@@ -306,11 +306,38 @@
                 <div class="flex flex-col gap-1">
                     <label for="ball-type" class="text-[11px] text-white/70 font-bold">球種（実寸で速度を計算）</label>
                     <select id="ball-type" class="bg-white/10 text-[12px] font-bold text-white outline-none rounded-lg border border-white/15 focus:border-[var(--lime)] py-2.5 px-2 w-full min-h-[42px]">
-                        <option value="0.074" selected>硬式球 74mm</option>
-                        <option value="0.072">軟式M号 72mm</option>
-                        <option value="0.068">軟式J号 68mm</option>
-                        <option value="0.097">ソフトボール 97mm</option>
+                        <optgroup label="野球">
+                            <option value="0.074" selected>硬式球 74mm</option>
+                            <option value="0.072">軟式M号 72mm</option>
+                            <option value="0.068">軟式J号 68mm</option>
+                            <option value="0.097">ソフトボール 97mm</option>
+                        </optgroup>
+                        <optgroup label="テニス">
+                            <option value="tennis:0.067">硬式テニス 67mm</option>
+                            <option value="softtennis:0.066">ソフトテニス 66mm</option>
+                        </optgroup>
+                        <optgroup label="小さい球">
+                            <option value="pingpong:0.040">卓球 40mm</option>
+                            <option value="golf:0.043">ゴルフ 43mm</option>
+                        </optgroup>
+                        <optgroup label="ドッジボール">
+                            <option value="dodge0:0.160">0号 160mm</option>
+                            <option value="dodge1:0.180">1号 180mm</option>
+                            <option value="dodge2:0.200">2号 200mm</option>
+                            <option value="dodge3:0.210">3号 210mm</option>
+                        </optgroup>
+                        <optgroup label="大きい球">
+                            <option value="soccer3:0.190">サッカー3号 190mm</option>
+                            <option value="soccer4:0.205">サッカー4号 205mm</option>
+                            <option value="soccer5:0.220">サッカー5号 220mm</option>
+                            <option value="volley4:0.200">バレー4号 200mm</option>
+                            <option value="volley5:0.210">バレー5号 210mm</option>
+                            <option value="basket5:0.220">バスケット5号 220mm</option>
+                            <option value="basket6:0.232">バスケット6号 232mm</option>
+                            <option value="basket7:0.245">バスケット7号 245mm</option>
+                        </optgroup>
                     </select>
+                    <p class="mt-1.5 text-[10px] leading-snug font-bold text-white/45">数字は直径の目安です。同じ太さでも、大きい球ほど速度は高く出ます。</p>
                 </div>
             </div>
 
@@ -376,7 +403,7 @@
     <div class="bg-[#0b1a14] border border-[rgba(200,245,66,0.2)] rounded-3xl p-6 w-full max-w-sm">
         <h2 class="font-['Bebas_Neue'] text-[1.8rem] text-[var(--lime)] tracking-wide mb-3">高精度のコツ</h2>
         <ul class="space-y-3.5 text-sm font-bold text-white/90 leading-relaxed">
-            <li><span class="text-[var(--lime)]">01</span> 球種を選ぶ。映った球の太さから速度を計算します</li>
+            <li><span class="text-[var(--lime)]">01</span> 球種を選ぶ。テニスやドッジボールも、実寸から速度を計算します</li>
             <li><span class="text-[var(--lime)]">02</span> スマホは固定。手ブレは誤検知の主因</li>
             <li><span class="text-[var(--lime)]">03</span> ガイド枠を左→右（または右→左）へしっかり横切る</li>
             <li><span class="text-[var(--lime)]">04</span> 速球は明るい場所で。計測中の「fps」表示が 60 だと最も正確</li>
@@ -413,7 +440,7 @@
     const ballType = document.getElementById('ball-type');
     const speedMethod = document.getElementById('speed-method');
 
-    // ---- TRACK v7.1 -------------------------------------------------
+    // ---- TRACK v7.2 -------------------------------------------------
     // 速度は球の実寸 ÷ カメラ解像度で測った太さ。距離は球が小さいときの予備。
     const FULL_HFOV_DEG = 68;
     // 検出コアは detector.js（背景モデル＋適応しきい値＋前景重心追跡）。
@@ -850,8 +877,15 @@
         if (wSrc > 0) point.diamX = wSrc * xScale;
     }
 
+    function selectedDiameterM() {
+        const raw = String(ballType.value || '');
+        const num = raw.includes(':') ? raw.slice(raw.lastIndexOf(':') + 1) : raw;
+        const diameterM = parseFloat(num);
+        return diameterM > 0 ? diameterM : 0.074;
+    }
+
     function measurementOptions() {
-        const diameterM = parseFloat(ballType.value) || 0.074;
+        const diameterM = selectedDiameterM();
         const distanceM = FALLBACK_DISTANCE_M;
         const crop = updateViewCrop();
         const vidW = (frameSource && frameSource.width) || video.videoWidth || crop.w || 1;

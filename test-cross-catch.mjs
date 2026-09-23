@@ -653,5 +653,18 @@ function diskGray(size, cx, cy, radius, bg, fg) {
     A('滑らかな球筋の端が元の端に合う', Math.abs(smooth[0].x - 0.1) < 0.001 && Math.abs(smooth[smooth.length - 1].x - 0.9) < 0.001, JSON.stringify(smooth[0]) + ' ' + JSON.stringify(smooth[smooth.length - 1]));
 }
 
+{
+    const samples = [];
+    for (let i = 0; i < 6; i++) {
+        samples.push({ x: 40 + i * 40, y: 135, t: i * 16.7, diamX: 14, diamY: 14, hPx: 14, wPx: 14, clipped: false });
+    }
+    const base = { sceneWidthM: 0, frameWidth: 480 };
+    const tennis = Core.solveSpeed(samples, Object.assign({ diameterM: 0.067 }, base));
+    const dodge = Core.solveSpeed(samples, Object.assign({ diameterM: 0.180 }, base));
+    const ratio = tennis && dodge ? dodge.kmh / tennis.kmh : 0;
+    A('テニスとドッジボール1号で速度が実寸比になる', Math.abs(ratio - (0.180 / 0.067)) < 0.02, 'ratio ' + ratio.toFixed(3));
+    A('ドッジボールのほうがテニスより速く出る', !!(dodge && tennis && dodge.kmh > tennis.kmh), JSON.stringify({ tennis: tennis && tennis.kmh, dodge: dodge && dodge.kmh }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
