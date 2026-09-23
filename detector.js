@@ -102,6 +102,9 @@
         const hist = new Int32Array(256);
         const colHit = new Uint8Array(aw);
         const profile = new Float32Array(aw);
+        const stamp = new Uint32Array(aw * ah);
+        const queue = new Int32Array(aw * ah);
+        let stampId = 1;
         let prevProfile = null;
         let lastPt = null;
         let stationarySince = 0;
@@ -190,6 +193,65 @@
             return { wPx: right - left + 1, hPx: bot - top + 1 };
         }
 
+        /**
+         * 一番強い画素からつながる一塊。
+         * 丸い球は縦も横も太いので、全前景の広がりだと「大きすぎる」と捨てられる。
+         * 一塊だけを見れば、枠を通る球を残せる。
+         */
+        function dominantBlob(start, thr) {
+            if (start < 0 || smooth[start] < thr) return null;
+            stampId++;
+            if (stampId >= 0x7fffffff) {
+                stamp.fill(0);
+                stampId = 1;
+            }
+            let qh = 0;
+            let qt = 0;
+            queue[qt++] = start;
+            stamp[start] = stampId;
+            let n = 0, sw = 0, sx = 0, sy = 0, sxx = 0, syy = 0;
+            let minX = aw, maxX = 0, minY = ah, maxY = 0;
+            while (qh < qt) {
+                const i = queue[qh++];
+                const d = smooth[i];
+                const x = i % aw;
+                const y = (i / aw) | 0;
+                n++;
+                sw += d;
+                sx += x * d;
+                sy += y * d;
+                sxx += x * x * d;
+                syy += y * y * d;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+                if (x > roi.x0 && stamp[i - 1] !== stampId && smooth[i - 1] >= thr) {
+                    stamp[i - 1] = stampId;
+                    queue[qt++] = i - 1;
+                }
+                if (x + 1 < roi.x1 && stamp[i + 1] !== stampId && smooth[i + 1] >= thr) {
+                    stamp[i + 1] = stampId;
+                    queue[qt++] = i + 1;
+                }
+                if (y > roi.y0 && stamp[i - aw] !== stampId && smooth[i - aw] >= thr) {
+                    stamp[i - aw] = stampId;
+                    queue[qt++] = i - aw;
+                }
+                if (y + 1 < roi.y1 && stamp[i + aw] !== stampId && smooth[i + aw] >= thr) {
+                    stamp[i + aw] = stampId;
+                    queue[qt++] = i + aw;
+                }
+            }
+            if (n < 1 || sw <= 0) return null;
+            return {
+                n, sw, sx, sy, sxx, syy,
+                bw: maxX - minX + 1,
+                bh: maxY - minY + 1,
+                minX, maxX
+            };
+        }
+
         /** |gray-bg| を ROI（＋1画素）で計算し、3x3 平均を smooth に書く */
         function computeSmoothDiff(gray) {
             for (let y = ey0; y < ey1; y++) {
@@ -252,11 +314,12 @@
             // 前景統計
             colHit.fill(0);
             let fg = 0, sw = 0, sx = 0, sy = 0, sxx = 0, syy = 0;
-            let minX = aw, maxX = -1;
+            let minX = aw, maxX = -1, maxI = -1, maxV = thr - 1;
             for (let y = roi.y0; y < roi.y1; y++) {
                 const row = y * aw;
                 for (let x = roi.x0; x < roi.x1; x++) {
-                    const d = smooth[row + x];
+                    const i = row + x;
+                    const d = smooth[i];
                     if (d < thr) continue;
                     fg++;
                     sw += d;
@@ -265,17 +328,29 @@
                     colHit[x] = 1;
                     if (x < minX) minX = x;
                     if (x > maxX) maxX = x;
+                    if (d > maxV) { maxV = d; maxI = i; }
                 }
+            }
+            const fgFrac = fg / roiN;
+            const blob = fg >= o.minPixels ? dominantBlob(maxI, thr) : null;
+            // 縦横が近い一塊だけを球とみなす。横に伸びたブラーは従来の重心のまま（速度がずれない）。
+            const roundish = !!(blob && blob.bw > 0 && blob.bh > 0
+                && blob.bw < blob.bh * 2.2 && blob.bh < blob.bw * 2.2);
+            const oneObject = !!(roundish && blob.n >= o.minPixels && blob.n >= fg * 0.55);
+            const fillsGate = !!(blob && blob.bw >= roiW * 0.94 && blob.bh >= roiH * 0.94);
+            if (oneObject) {
+                sw = blob.sw; sx = blob.sx; sy = blob.sy; sxx = blob.sxx; syy = blob.syy;
+                minX = blob.minX; maxX = blob.maxX; fg = blob.n;
             }
             // 前景が検出領域の左右端に接している＝物体が一部しか映っておらず重心が内側に寄る
             const clipped = minX <= roi.x0 + 1 || maxX >= roi.x1 - 2;
-            const fgFrac = fg / roiN;
             let activeCols = 0;
             for (let x = roi.x0; x < roi.x1; x++) activeCols += colHit[x];
 
-            const isGlobal = pan.panning
-                || fgFrac > o.maxFgFrac
+            const scattered = fgFrac > o.maxFgFrac
                 || (activeCols > roiW * o.globalColsFrac && fgFrac > o.globalColsMinFg);
+            // 画面全体の変化は捨てる。一つの丸い塊が枠を埋めかけていても、球として残す。
+            const isGlobal = pan.panning || fillsGate || (!oneObject && scattered);
             if (isGlobal) {
                 bg.set(gray);
                 lastPt = null;
@@ -283,7 +358,7 @@
                 return { kind: 'global', thr, fgFrac, pan: pan.shift };
             }
 
-            if (fg < o.minPixels) {
+            if (fg < o.minPixels || sw <= 0) {
                 updateBg(gray, thr);
                 lastPt = null;
                 stationarySince = 0;
@@ -298,7 +373,7 @@
             // 縦長画面では丸い球が横長になる。進行方向のぼけも横に伸びる。
             // 縦が細いままの一塊は球として残し、縦横とも散らばるものだけ捨てる。
             const flatStreak = wideX && !wideY && spreadY < roiH * 0.22 && spreadX < roiW * 0.55;
-            if ((wideX || wideY) && !flatStreak) {
+            if (!oneObject && (wideX || wideY) && !flatStreak) {
                 // 大きすぎる／散らばりすぎ（体・全体ずれ）: 背景をやや速めに追従
                 updateBg(gray, thr, o.bgAlpha * 0.5);
                 lastPt = null;

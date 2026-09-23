@@ -570,5 +570,54 @@ function diskGray(size, cx, cy, radius, bg, fg) {
     }
 }
 
+{
+    // 枠の高さに近い丸い球。全前景の横広がりだと wide/global で消えていた。
+    const sized = Core.fitAnalysisSize(499, 1080, 640);
+    const aw = sized.aw, ah = sized.ah;
+    const det = Core.createDetector({
+        aw, ah,
+        roi: { x0: 0.02, x1: 0.98, y0: 0.30, y1: 0.70 }
+    });
+    const trk = Core.createTracker({ aw, roiX0: 0.10, roiX1: 0.90 });
+    const r = Math.round(ah * 0.16);
+    const cy = Math.round(ah * 0.5);
+    const fromX = Math.round(aw * 0.22);
+    const toX = Math.round(aw * 0.78);
+    const framesN = 8;
+    let hit = null;
+    const bg = new Uint8Array(aw * ah);
+    bg.fill(72);
+    for (let i = 0; i < 4; i++) det.feed(bg, i * 33);
+    for (let i = 0; i < framesN; i++) {
+        const g = Uint8Array.from(bg);
+        const x = fromX + (toX - fromX) * (i / (framesN - 1));
+        for (let y = cy - r - 1; y <= cy + r + 1; y++) {
+            for (let xx = Math.floor(x - r - 1); xx <= Math.ceil(x + r + 1); xx++) {
+                if (xx < 0 || y < 0 || xx >= aw || y >= ah) continue;
+                if ((xx - x) ** 2 + (y - cy) ** 2 <= r * r) g[y * aw + xx] = 230;
+            }
+        }
+        const res = det.feed(g, 200 + i * 33);
+        if (res.kind === 'point') trk.push(res.point);
+        else if (res.kind === 'global') trk.reset();
+        if (i > 2) {
+            const h = trk.evaluate(null, res.kind !== 'point');
+            if (h) hit = h;
+        }
+    }
+    for (let i = 0; i < 3 && !hit; i++) {
+        const res = det.feed(bg, 500 + i * 33);
+        const h = trk.evaluate(null, res.kind !== 'point');
+        if (h) hit = h;
+    }
+    A('枠の高さに近い丸い球を検出する', !!hit, 'hitなし r=' + r);
+    if (hit) {
+        const solved = Core.solveSpeed(hit.samples, {
+            diameterM: 0.074, sceneWidthM: 2.8, frameWidth: aw, minKmh: 3, maxKmh: 180
+        });
+        A('大きな丸い球の速度が範囲内', !!(solved && solved.kmh >= 3 && solved.kmh <= 180), JSON.stringify(solved));
+    }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
