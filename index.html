@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - PRO FIELD v6.3</title>
+    <title>AIスピードガン プロ - PRO FIELD v6.3.1</title>
     <meta name="description" content="スマホで高精度に球速を測る AI Speed Gun Pro">
     <meta name="theme-color" content="#07140f">
     <meta name="mobile-web-app-capable" content="yes">
@@ -61,12 +61,14 @@
             background:
                 linear-gradient(180deg, rgba(4, 10, 8, 0.55) 0%, transparent 22%, transparent 68%, rgba(4, 10, 8, 0.72) 100%);
         }
-        video, canvas {
+        video {
             position: absolute;
             inset: 0;
             width: 100%;
             height: 100%;
             object-fit: cover;
+            z-index: 0;
+            background: #000;
         }
         .ui-layer {
             position: absolute;
@@ -286,7 +288,6 @@
 
 <div id="app-container">
     <video id="video-input" autoplay playsinline muted></video>
-    <canvas id="canvas-output"></canvas>
     
     <!-- ガイドフレーム -->
     <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-[5]">
@@ -301,7 +302,7 @@
             <div class="flex items-start justify-between gap-3 px-0.5">
                 <div>
                     <div class="brand-mark">SPEED GUN</div>
-                    <div class="brand-sub">Pro Field v6.3</div>
+                    <div class="brand-sub">Pro Field v6.3.1</div>
                 </div>
                 <button id="settings-toggle" class="chip interactive" aria-expanded="false" aria-controls="settings-panel">
                     <span class="text-[var(--lime)] text-[10px] font-black">設定</span>
@@ -417,7 +418,6 @@
 
 <script>
     const video = document.getElementById('video-input');
-    const canvas = document.getElementById('canvas-output');
     const speedDisplay = document.getElementById('speed-display');
     const maxSpeedDisplay = document.getElementById('max-speed-display');
     const mainBtn = document.getElementById('main-btn');
@@ -430,9 +430,8 @@
     const ballType = document.getElementById('ball-type');
     const camDistInput = document.getElementById('cam-dist');
     const speedMethod = document.getElementById('speed-method');
-    const ctx = canvas.getContext('2d');
 
-    // ---- PRO FIELD v6.3 ---------------------------------------------------
+    // ---- PRO FIELD v6.3.1 -------------------------------------------------
     // 速度は球の実寸 ÷ カメラ解像度で測った太さ。距離は球が小さいときの予備。
     const FULL_HFOV_DEG = 68;
     // 検出コアは detector.js（背景モデル＋適応しきい値＋前景重心追跡）。
@@ -573,14 +572,27 @@
         clearProgress();
     }
 
-    function syncSize() {
-        const w = video.videoWidth, h = video.videoHeight;
-        if (!w || !h) return false;
-        if (canvas.width !== w || canvas.height !== h) {
-            canvas.width = w;
-            canvas.height = h;
+    /** プレビュー中央の平均輝度。0 に近いときはカメラが黒フレームを出している */
+    function previewLuma() {
+        if (!analysisCtx || !video.videoWidth) return -1;
+        try {
+            const crop = updateViewCrop();
+            analysisCtx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, AW, AH);
+            const data = analysisCtx.getImageData(0, 0, AW, AH).data;
+            let sum = 0;
+            let n = 0;
+            for (let i = 0; i < data.length; i += 64) {
+                sum += data[i] + data[i + 1] + data[i + 2];
+                n++;
+            }
+            return n ? sum / (n * 3) : -1;
+        } catch (_) {
+            return -1;
         }
-        return true;
+    }
+
+    function wait(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     /** 高フレームレート優先でカメラを取得（速球は 60fps が精度の鍵） */
@@ -604,7 +616,7 @@
         throw lastErr || new Error('camera unavailable');
     }
 
-    /** 取得後に 60fps へ引き上げを試み、実効 fps を記録 */
+    /** 取得後に 60fps へ引き上げを試み、実効 fps を記録。露出は自動のまま（短いシャッターに固定すると映像が真っ黒になる） */
     async function tuneTrack(stream) {
         const track = stream.getVideoTracks()[0];
         if (!track) return;
@@ -619,39 +631,64 @@
             }
         } catch (_) { /* 非対応端末は無視 */ }
         try {
-            const caps = track.getCapabilities ? track.getCapabilities() : null;
-            const modes = caps && caps.exposureMode;
-            const range = caps && caps.exposureTime;
-            if (modes && modes.indexOf('manual') >= 0 && range && range.min != null) {
-                const shutter = Math.min(range.max || 0.001, Math.max(range.min, 0.001));
-                await track.applyConstraints({ advanced: [{ exposureMode: 'manual', exposureTime: shutter }] });
-            }
-        } catch (_) { /* 露出固定に非対応ならそのまま */ }
-        try {
             const s = track.getSettings ? track.getSettings() : {};
             cameraFps = s.frameRate ? Math.round(s.frameRate) : 0;
         } catch (_) { /* ignore */ }
     }
 
+    async function attachStream(stream) {
+        video.srcObject = stream;
+        video.muted = true;
+        video.playsInline = true;
+        await video.play();
+        if (!video.videoWidth) {
+            await new Promise(r => {
+                video.onloadedmetadata = r;
+                setTimeout(r, 2000);
+            });
+        }
+    }
+
+    /** 起動直後の黒は待ち、真っ黒のままなら自動露出に戻して開き直す */
+    async function recoverIfBlack(stream) {
+        await wait(700);
+        const first = previewLuma();
+        if (first < 0 || first >= 12) return stream;
+        await wait(600);
+        const second = previewLuma();
+        if (second < 0 || second >= 12) return stream;
+        const track = stream.getVideoTracks()[0];
+        if (track && track.applyConstraints) {
+            try {
+                await track.applyConstraints({ advanced: [{ exposureMode: 'continuous' }] });
+            } catch (_) { /* 非対応なら開き直す */ }
+        }
+        await wait(400);
+        if (previewLuma() >= 12) return stream;
+        stream.getTracks().forEach((t) => t.stop());
+        await wait(200);
+        const loose = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' } },
+            audio: false
+        });
+        await attachStream(loose);
+        return loose;
+    }
+
     async function startCamera() {
         try {
-            const stream = await acquireStream();
+            let stream = await acquireStream();
             await tuneTrack(stream);
-            video.srcObject = stream;
-            video.muted = true;
-            video.playsInline = true;
-            await video.play();
-            if (!video.videoWidth) {
-                await new Promise(r => {
-                    video.onloadedmetadata = r;
-                    setTimeout(r, 2000);
-                });
-            }
-            syncSize();
+            await attachStream(stream);
             analysisCanvas = document.createElement('canvas');
             analysisCanvas.width = AW;
             analysisCanvas.height = AH;
             analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
+            stream = await recoverIfBlack(stream);
+            try {
+                const s = stream.getVideoTracks()[0] && stream.getVideoTracks()[0].getSettings();
+                cameraFps = s && s.frameRate ? Math.round(s.frameRate) : cameraFps;
+            } catch (_) { /* ignore */ }
             startLoop();
         } catch (e) {
             console.error(e);
@@ -691,8 +728,7 @@
     }
 
     function tick() {
-        if (video.readyState < 2 || !syncSize()) return;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        if (video.readyState < 2 || !video.videoWidth) return;
         if (appState === 1) {
             process();
             drawHud();
