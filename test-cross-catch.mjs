@@ -641,5 +641,17 @@ function diskGray(size, cx, cy, radius, bg, fg) {
     A('軌道の点は画面の割合で返す', !!(decel && decel.points.every((p) => p.x >= 0 && p.x <= 1.2 && p.y > 0 && p.y < 1)), '');
 }
 
+{
+    const raw = [
+        { x: 0.1, y: 0.50, kmh: 100 },
+        { x: 0.4, y: 0.46, kmh: 96 },
+        { x: 0.7, y: 0.52, kmh: 90 },
+        { x: 0.9, y: 0.48, kmh: 88 }
+    ];
+    const smooth = Core.smoothTrack(raw);
+    A('球筋を滑らかな点列にする', smooth.length >= 10, String(smooth.length));
+    A('滑らかな球筋の端が元の端に合う', Math.abs(smooth[0].x - 0.1) < 0.001 && Math.abs(smooth[smooth.length - 1].x - 0.9) < 0.001, JSON.stringify(smooth[0]) + ' ' + JSON.stringify(smooth[smooth.length - 1]));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

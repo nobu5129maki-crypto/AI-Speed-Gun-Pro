@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - PRO FIELD v6.4.0</title>
+    <title>AIスピードガン プロ - TRACK v7.0</title>
     <meta name="description" content="スマホで高精度に球速を測る AI Speed Gun Pro">
     <meta name="theme-color" content="#07140f">
     <meta name="mobile-web-app-capable" content="yes">
@@ -91,6 +91,35 @@
             border-color: rgba(200, 245, 66, 0.45);
         }
         #reanalyze-btn:disabled { opacity: 0.4; }
+        .track-sheet {
+            width: min(100%, 28rem);
+            margin: 0 auto;
+            padding: 0.4rem 0.55rem 0.5rem;
+            border-radius: 1rem;
+            background: rgba(4, 14, 20, 0.78);
+            border: 1px solid rgba(130, 220, 255, 0.38);
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+            pointer-events: none;
+        }
+        .track-sheet.hidden { display: none; }
+        .track-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.18em;
+            color: rgba(186, 244, 255, 0.92);
+        }
+        .track-head span:last-child {
+            letter-spacing: 0.08em;
+            color: rgba(255, 255, 255, 0.45);
+        }
+        #track-canvas {
+            width: 100%;
+            height: 112px;
+            display: block;
+        }
         .ui-layer {
             position: absolute;
             inset: 0;
@@ -324,7 +353,7 @@
             <div class="flex items-start justify-between gap-3 px-0.5">
                 <div>
                     <div class="brand-mark">SPEED GUN</div>
-                    <div class="brand-sub">Pro Field v6.4.0</div>
+                    <div class="brand-sub">Track v7.0</div>
                 </div>
                 <button id="settings-toggle" class="chip interactive" aria-expanded="false" aria-controls="settings-panel">
                     <span class="text-[var(--lime)] text-[10px] font-black">設定</span>
@@ -385,6 +414,11 @@
             </div>
         </div>
 
+        <div id="track-sheet" class="track-sheet hidden" aria-hidden="true">
+            <div class="track-head"><span>速度軌道</span><span>スピードのみ</span></div>
+            <canvas id="track-canvas" width="640" height="224"></canvas>
+        </div>
+
         <div class="flex flex-col items-center gap-3 mb-1">
             <div class="flex flex-wrap items-center justify-center gap-2">
                 <button id="tip-btn" class="chip interactive">
@@ -424,7 +458,7 @@
             <li><span class="text-[var(--lime)]">03</span> スマホは固定。手ブレは誤検知の主因</li>
             <li><span class="text-[var(--lime)]">04</span> ガイド枠を左→右（または右→左）へしっかり横切る</li>
             <li><span class="text-[var(--lime)]">05</span> 速球は明るい場所で。計測中の「fps」表示が 60 だと最も正確</li>
-            <li><span class="text-[var(--lime)]">06</span> 計測後に軌道と初速・終速が出ます。拾えなければ「直前を再解析」で投げ直さずにやり直せます</li>
+            <li><span class="text-[var(--lime)]">06</span> 計測後、速度軌道に球筋と初速・終速が出ます。拾えなければ「直前を再解析」</li>
         </ul>
         <button id="close-modal" class="w-full mt-6 bg-[var(--lime)] text-black font-black py-3 rounded-2xl text-xs tracking-wide">閉じる</button>
     </div>
@@ -468,7 +502,7 @@
     const camDistInput = document.getElementById('cam-dist');
     const speedMethod = document.getElementById('speed-method');
 
-    // ---- PRO FIELD v6.4.0 -------------------------------------------------
+    // ---- TRACK v7.0 -------------------------------------------------
     // 速度は球の実寸 ÷ カメラ解像度で測った太さ。距離は球が小さいときの予備。
     const FULL_HFOV_DEG = 68;
     // 検出コアは detector.js（背景モデル＋適応しきい値＋前景重心追跡）。
@@ -523,6 +557,8 @@
     const RING_MAX = 40;
     const pathCanvas = document.getElementById('path-layer');
     const pathCtx = pathCanvas.getContext('2d');
+    const trackCanvas = document.getElementById('track-canvas');
+    const trackSheet = document.getElementById('track-sheet');
     const speedSplit = document.getElementById('speed-split');
     const v0Display = document.getElementById('v0-display');
     const v1Display = document.getElementById('v1-display');
@@ -543,6 +579,11 @@
             pathLocked = false;
             clearPath();
             if (speedSplit) speedSplit.classList.add('hidden');
+            const sheet = document.getElementById('track-sheet');
+            if (sheet) {
+                sheet.classList.add('hidden');
+                sheet.setAttribute('aria-hidden', 'true');
+            }
         }
         if (state === 1) {
             frameRing.length = 0;
@@ -958,22 +999,106 @@
         const w = video.clientWidth;
         const h = video.clientHeight;
         if (!w || !h || !points || points.length < 2) return;
+        const pts = Core.smoothTrack(points);
         pathCanvas.width = w;
         pathCanvas.height = h;
-        pathCtx.lineWidth = Math.max(3, w * 0.012);
         pathCtx.lineCap = 'round';
         pathCtx.lineJoin = 'round';
-        const speeds = points.map((p) => p.kmh);
+        pathCtx.shadowColor = flat ? 'rgba(200, 245, 66, 0.9)' : 'rgba(120, 230, 255, 0.95)';
+        pathCtx.shadowBlur = flat ? 8 : 16;
+        pathCtx.beginPath();
+        pathCtx.moveTo(pts[0].x * w, pts[0].y * h);
+        for (let i = 1; i < pts.length; i++) pathCtx.lineTo(pts[i].x * w, pts[i].y * h);
+        pathCtx.strokeStyle = flat ? 'rgba(232, 255, 170, 0.9)' : 'rgba(236, 252, 255, 0.92)';
+        pathCtx.lineWidth = Math.max(4, w * 0.014);
+        pathCtx.stroke();
+        pathCtx.shadowBlur = 0;
+        const speeds = pts.map((p) => p.kmh);
         const lo = Math.min.apply(null, speeds);
         const hi = Math.max.apply(null, speeds);
-        for (let i = 1; i < points.length; i++) {
-            const u = flat || hi - lo < 0.8 ? 0.72 : (points[i].kmh - lo) / (hi - lo);
-            pathCtx.strokeStyle = flat ? 'rgba(200, 245, 66, 0.85)' : speedHue(u);
+        pathCtx.lineWidth = Math.max(2, w * 0.007);
+        for (let i = 1; i < pts.length; i++) {
+            const u = flat || hi - lo < 0.8 ? 0.72 : (pts[i].kmh - lo) / (hi - lo);
+            pathCtx.strokeStyle = flat ? 'rgba(255, 255, 255, 0.9)' : speedHue(u);
             pathCtx.beginPath();
-            pathCtx.moveTo(points[i - 1].x * w, points[i - 1].y * h);
-            pathCtx.lineTo(points[i].x * w, points[i].y * h);
+            pathCtx.moveTo(pts[i - 1].x * w, pts[i - 1].y * h);
+            pathCtx.lineTo(pts[i].x * w, pts[i].y * h);
             pathCtx.stroke();
         }
+        pathCtx.fillStyle = '#fff';
+        for (const p of [pts[0], pts[pts.length - 1]]) {
+            pathCtx.beginPath();
+            pathCtx.arc(p.x * w, p.y * h, Math.max(4, w * 0.012), 0, Math.PI * 2);
+            pathCtx.fill();
+        }
+    }
+
+    function drawTrackCard(points) {
+        if (!trackCanvas || !points || points.length < 2) return;
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
+        const w = trackCanvas.clientWidth || 320;
+        const h = 112;
+        trackCanvas.width = Math.max(2, Math.round(w * dpr));
+        trackCanvas.height = Math.round(h * dpr);
+        const ctx = trackCanvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+        ctx.strokeStyle = 'rgba(150, 220, 235, 0.16)';
+        ctx.lineWidth = 1;
+        for (let g = 1; g <= 2; g++) {
+            const y = (h * g) / 3;
+            ctx.beginPath();
+            ctx.moveTo(18, y);
+            ctx.lineTo(w - 18, y);
+            ctx.stroke();
+        }
+        const pts = Core.smoothTrack(points);
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const p of pts) {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+        const dx = Math.max(0.04, maxX - minX);
+        const dy = Math.max(0.02, maxY - minY);
+        const padX = 22;
+        const padY = 26;
+        const xy = (p) => [
+            padX + ((p.x - minX) / dx) * (w - padX * 2),
+            padY + ((p.y - minY) / dy) * (h - padY * 2)
+        ];
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = 'rgba(130, 230, 255, 0.9)';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        const origin = xy(pts[0]);
+        ctx.moveTo(origin[0], origin[1]);
+        for (let i = 1; i < pts.length; i++) {
+            const a = xy(pts[i]);
+            ctx.lineTo(a[0], a[1]);
+        }
+        ctx.strokeStyle = 'rgba(230, 252, 255, 0.96)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.font = '800 11px Manrope, sans-serif';
+        [pts[0], pts[pts.length - 1]].forEach((p, i) => {
+            const a = xy(p);
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(a[0], a[1], 5.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(120, 220, 255, 0.9)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            const label = (i === 0 ? '初速 ' : '終速 ') + (isFinite(p.kmh) ? p.kmh.toFixed(1) : '--');
+            ctx.fillStyle = 'rgba(198, 246, 255, 0.95)';
+            ctx.textAlign = i === 0 ? 'left' : 'right';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(label, a[0] + (i === 0 ? 8 : -8), Math.max(14, a[1] - 8));
+        });
     }
 
     function drawLiveTrail() {
@@ -1058,7 +1183,14 @@
             if (vDelta) vDelta.textContent = Math.abs(diff) >= 1 ? ((diff > 0 ? '+' : '') + diff.toFixed(1)) : '±0';
             speedSplit.classList.remove('hidden');
         }
-        if (report && report.points) drawPath(report.points, false);
+        if (report && report.points) {
+            drawPath(report.points, false);
+            if (trackSheet) {
+                trackSheet.classList.remove('hidden');
+                trackSheet.setAttribute('aria-hidden', 'false');
+            }
+            requestAnimationFrame(() => drawTrackCard(report.points));
+        }
         if (speed > maxSpeed) {
             maxSpeed = speed;
             maxSpeedDisplay.innerText = maxSpeed.toFixed(1);

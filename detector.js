@@ -874,6 +874,35 @@
         };
     }
 
+    /** 計測点を滑らかな球筋にする。端の位置は保つ。 */
+    function smoothTrack(points) {
+        const src = (points || []).filter((p) => p && isFinite(p.x) && isFinite(p.y));
+        if (src.length < 2) return src.slice();
+        const n = src.length;
+        const outN = Math.min(32, Math.max(10, n * 4));
+        const at = (i) => src[Math.max(0, Math.min(n - 1, i))];
+        const out = [];
+        for (let s = 0; s < outN; s++) {
+            const t = (s / (outN - 1)) * (n - 1);
+            const i = Math.floor(t);
+            const u = t - i;
+            const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+            const c = (a, b, d, e) => 0.5 * ((2 * b) + (-a + d) * u + (2 * a - 5 * b + 4 * d - e) * u * u + (-a + 3 * b - 3 * d + e) * u * u * u);
+            out.push({
+                x: c(p0.x, p1.x, p2.x, p3.x),
+                y: c(p0.y, p1.y, p2.y, p3.y),
+                kmh: p1.kmh + ((p2.kmh || p1.kmh) - (p1.kmh || 0)) * u
+            });
+        }
+        out[0].x = src[0].x;
+        out[0].y = src[0].y;
+        out[0].kmh = src[0].kmh;
+        out[out.length - 1].x = src[n - 1].x;
+        out[out.length - 1].y = src[n - 1].y;
+        out[out.length - 1].kmh = src[n - 1].kmh;
+        return out;
+    }
+
     return {
         DETECTOR_DEFAULTS,
         TRACKER_DEFAULTS,
@@ -886,6 +915,7 @@
         profileWidth,
         fitAnalysisSize,
         solveSpeed,
-        pathReport
+        pathReport,
+        smoothTrack
     };
 });
