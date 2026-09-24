@@ -666,5 +666,68 @@ function diskGray(size, cx, cy, radius, bg, fg) {
     A('ドッジボールのほうがテニスより速く出る', !!(dodge && tennis && dodge.kmh > tennis.kmh), JSON.stringify({ tennis: tennis && tennis.kmh, dodge: dodge && dodge.kmh }));
 }
 
+{
+    // 縦画面・30fps。近い速球は枠幅の 0.85 を超えて跳び、旧実装は軌道を捨てていた。
+    const fit = Core.fitAnalysisSize(499, 1080, 640);
+    const aw = fit.aw, ah = fit.ah;
+    const roiW = aw * 0.8;
+    const jump = Math.round(roiW * 0.95);
+    const cy = Math.round(ah * 0.5);
+    const r = 5;
+    const blur = Math.round(jump * 0.55);
+    const bg = new Uint8Array(aw * ah);
+    bg.fill(80);
+    const drawStreak = (g, x) => {
+        const x0 = Math.round(x - blur / 2);
+        const y0 = cy - r;
+        for (let y = y0; y < y0 + r * 2; y++) {
+            for (let xx = x0; xx < x0 + blur + r * 2; xx++) {
+                if (xx < 0 || y < 0 || xx >= aw || y >= ah) continue;
+                g[y * aw + xx] = 230;
+            }
+        }
+    };
+    const runPortrait = (xs, dt, dropMiddle) => {
+        const det = Core.createDetector({
+            aw, ah, roi: { x0: 0.02, x1: 0.98, y0: 0.30, y1: 0.70 }
+        });
+        const trk = Core.createTracker({ aw, roiX0: 0.10, roiX1: 0.90 });
+        let hit = null;
+        let t = 1000;
+        for (let i = 0; i < 8; i++) {
+            det.feed(bg, t);
+            t += dt;
+        }
+        for (let i = 0; i < xs.length; i++) {
+            if (dropMiddle && i === 1) {
+                const res = det.feed(bg, t);
+                if (res.kind === 'global') trk.reset();
+                t += dt;
+            }
+            const g = Uint8Array.from(bg);
+            drawStreak(g, xs[i]);
+            const res = det.feed(g, t);
+            if (res.kind === 'point') trk.push(res.point);
+            else if (res.kind === 'global') trk.reset();
+            const h = trk.evaluate(null, res.kind !== 'point');
+            if (h) hit = h;
+            t += dt;
+        }
+        for (let i = 0; i < 4 && !hit; i++) {
+            const res = det.feed(bg, t);
+            const h = trk.evaluate(null, true);
+            if (h) hit = h;
+            t += dt;
+        }
+        return { hit, pts: trk.length, jump };
+    };
+    const x0 = Math.round(aw * 0.18);
+    const x1 = x0 + jump;
+    const close = runPortrait([x0, x1], 1000 / 30, false);
+    A('縦画面30fpsの近い速球を検出する', !!close.hit, JSON.stringify({ pts: close.pts, jump: close.jump, aw }));
+    const skipped = runPortrait([x0, x0 + jump * 0.5, x1], 1000 / 30, true);
+    A('縦画面で1フレーム欠けても速球を残す', !!skipped.hit, JSON.stringify({ pts: skipped.pts, jump: skipped.jump }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

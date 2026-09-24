@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>AIスピードガン プロ - TRACK v7.2</title>
+    <title>AIスピードガン プロ - TRACK v7.3</title>
     <meta name="description" content="スマホで高精度に球速を測る AI Speed Gun Pro">
     <meta name="theme-color" content="#07140f">
     <meta name="mobile-web-app-capable" content="yes">
@@ -294,7 +294,7 @@
             <div class="flex items-start justify-between gap-3 px-0.5">
                 <div>
                     <div class="brand-mark">SPEED GUN</div>
-                    <div class="brand-sub">Track v7.2</div>
+                    <div class="brand-sub">Track v7.3</div>
                 </div>
                 <button id="settings-toggle" class="chip interactive" aria-expanded="false" aria-controls="settings-panel">
                     <span class="text-[var(--lime)] text-[10px] font-black">設定</span>
@@ -440,7 +440,7 @@
     const ballType = document.getElementById('ball-type');
     const speedMethod = document.getElementById('speed-method');
 
-    // ---- TRACK v7.2 -------------------------------------------------
+    // ---- TRACK v7.3 -------------------------------------------------
     // 速度は球の実寸 ÷ カメラ解像度で測った太さ。距離は球が小さいときの予備。
     const FULL_HFOV_DEG = 68;
     // 検出コアは detector.js（背景モデル＋適応しきい値＋前景重心追跡）。
@@ -457,7 +457,9 @@
     const MAX_SPEED = 180;
     const WARMUP_MS = 220;
     const UI_ACTIVATE_DX = 0.08;
-    const FIRE_SPAN = 0.75;        // 枠幅のこの割合を横断したら確定してよい
+    const FIRE_SPAN = 0.55;        // 枠幅のこの割合を横断したら確定してよい
+    const FIRE_FAST_SPAN = 0.28;   // 速球は短い横断でも確定してよい
+    const FIRE_FAST_MS = 120;      // この時間以内の大移動は速球
     const FIRE_MAX_WAIT_MS = 350;  // 遅い物体はこの時間で確定
     const SETTINGS_KEY = 'aispeedgun.pro.v62.settings';
     // 太さが測れないときだけ使う予備距離。画面では聞かない。
@@ -1055,10 +1057,13 @@
         }
 
         if (fired || wall - scanStart < WARMUP_MS) return;
-        // 精度優先: 物体が去った／枠の 75% を横断した／0.35 秒追跡した時点で、できるだけ多くの点を使って確定
+        // 精度優先: 物体が去った／枠を横断した／0.35 秒追跡した時点で確定。速球は短い横断でも出す。
         const settled = !(res && res.kind === 'point');
-        if (settled || tracker.spanFrac() >= FIRE_SPAN || tracker.durationMs() >= FIRE_MAX_WAIT_MS) {
-            tryFire(settled);
+        const fastShort = tracker.length >= 2
+            && tracker.spanFrac() >= FIRE_FAST_SPAN
+            && tracker.durationMs() <= FIRE_FAST_MS;
+        if (settled || tracker.spanFrac() >= FIRE_SPAN || tracker.durationMs() >= FIRE_MAX_WAIT_MS || fastShort) {
+            tryFire(settled || fastShort);
         }
     }
 

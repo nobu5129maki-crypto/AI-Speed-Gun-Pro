@@ -54,14 +54,18 @@
         minDxFrac: 0.06,     // 最低横断距離（画面幅比）
         minStepFrac: 0.003,  // これ未満の移動は同一点扱い
         maxJumpFrac: 0.85,   // 枠幅比。これ超のジャンプは別物体
-        minDt: 0.012,
+        minDt: 0.006,
         maxDt: 1.4,
         twoPointMaxDt: 0.25, // 2点のみで確定できる最大時間（両ゾーン通過時）
-        // 速球用 2 点確定（30fps で枠内に 2 フレームしか映らない球）
-        fastTwoPointMaxDt: 0.09, // 2 点の時間差がこれ以下
-        fastTwoPointSpan: 0.20,  // 枠幅比でこれ以上移動
-        fastTwoPointDyRatio: 0.35, // |dy| <= dx * 比
-        fastTwoPointSizeRatio: 8.0, // 前景サイズ比がこれ以下（ブラーで大きさは変わる）
+        // 速球用 2 点確定（縦画面・30fps では枠内に 2 フレームしか残らない）
+        fastTwoPointMaxDt: 0.12, // 1 フレーム欠けても 30fps でつながる
+        fastTwoPointSpan: 0.16,  // 枠幅比でこれ以上移動
+        fastTwoPointDyRatio: 0.45, // |dy| <= dx * 比
+        fastTwoPointSizeRatio: 10.0, // 前景サイズ比がこれ以下（ブラーで大きさは変わる）
+        fastLeapMaxDt: 110,      // ms。この時間内の大きな横跳びは同一球
+        fastLeapMaxFrac: 1.45,   // 枠幅比。縦画面の速球は 0.85 を超える
+        fastLeapMinDxFrac: 0.12, // 画面幅比。これ未満の跳びは速球とみなさない
+        fastLeapDyRatio: 0.45,
         minLinearity: 0.42,
         minDirection: 0.52,
         minHorizRatio: 0.38,
@@ -347,17 +351,6 @@
             let activeCols = 0;
             for (let x = roi.x0; x < roi.x1; x++) activeCols += colHit[x];
 
-            const scattered = fgFrac > o.maxFgFrac
-                || (activeCols > roiW * o.globalColsFrac && fgFrac > o.globalColsMinFg);
-            // 画面全体の変化は捨てる。一つの丸い塊が枠を埋めかけていても、球として残す。
-            const isGlobal = pan.panning || fillsGate || (!oneObject && scattered);
-            if (isGlobal) {
-                bg.set(gray);
-                lastPt = null;
-                stationarySince = 0;
-                return { kind: 'global', thr, fgFrac, pan: pan.shift };
-            }
-
             if (fg < o.minPixels || sw <= 0) {
                 updateBg(gray, thr);
                 lastPt = null;
@@ -372,7 +365,19 @@
             const wideY = spreadY > roiH * o.maxSpreadY;
             // 縦長画面では丸い球が横長になる。進行方向のぼけも横に伸びる。
             // 縦が細いままの一塊は球として残し、縦横とも散らばるものだけ捨てる。
-            const flatStreak = wideX && !wideY && spreadY < roiH * 0.22 && spreadX < roiW * 0.55;
+            const flatStreak = !wideY && spreadY < roiH * 0.28 && spreadX < roiW * 0.72
+                && (wideX || !!(blob && blob.bw >= blob.bh * 2.2 && blob.bw >= 8));
+            const scattered = fgFrac > o.maxFgFrac
+                || (activeCols > roiW * o.globalColsFrac && fgFrac > o.globalColsMinFg);
+            // 横に長い速球の筋は列の多くを点けるが、カメラ全体の動きではない。
+            const isGlobal = pan.panning || fillsGate || (!oneObject && !flatStreak && scattered);
+            if (isGlobal) {
+                bg.set(gray);
+                lastPt = null;
+                stationarySince = 0;
+                return { kind: 'global', thr, fgFrac, pan: pan.shift };
+            }
+
             if (!oneObject && (wideX || wideY) && !flatStreak) {
                 // 大きすぎる／散らばりすぎ（体・全体ずれ）: 背景をやや速めに追従
                 updateBg(gray, thr, o.bgAlpha * 0.5);
@@ -495,6 +500,19 @@
 
         function reset() { pts = []; }
 
+        function isFastLeap(last, p, jump) {
+            const dt = p.t - last.t;
+            if (dt < 4 || dt > o.fastLeapMaxDt) return false;
+            const dx = Math.abs(p.x - last.x);
+            const dy = Math.abs(p.y - last.y);
+            if (dx < aw * o.fastLeapMinDxFrac) return false;
+            if (dy > dx * o.fastLeapDyRatio) return false;
+            if (jump > roiW * o.fastLeapMaxFrac) return false;
+            const n0 = last.n || 1, n1 = p.n || 1;
+            const ratio = Math.max(n0, n1) / Math.max(1, Math.min(n0, n1));
+            return ratio <= o.fastTwoPointSizeRatio;
+        }
+
         function push(p) {
             if (pts.length) {
                 const last = pts[pts.length - 1];
@@ -502,7 +520,7 @@
                 if (dt < 4) return false;
                 const jump = Math.hypot(p.x - last.x, p.y - last.y);
                 if (jump > roiW * o.maxJumpFrac) {
-                    pts = [];
+                    if (!isFastLeap(last, p, jump)) pts = [];
                 } else if (jump < aw * o.minStepFrac) {
                     return false;
                 }
@@ -606,12 +624,12 @@
 
             if (cleaned.length < o.minPoints || use.length < 2) {
                 const zonePass = use.length >= 2 && z.both && st.dt <= o.twoPointMaxDt;
-                // 2 点の速球は物体が去った後（settled）に確定し、ノイズ 2 点の即発火を防ぐ
-                const fastPass = !!settled && use.length === 2 && fastTwoPoint(use, st);
+                // 2 点の速球: 去ったあと、または枠をしっかり跳んだとき
+                const fastPass = use.length === 2 && fastTwoPoint(use, st)
+                    && (!!settled || st.dx >= roiW * 0.28);
                 if (!zonePass && !fastPass) return null;
             } else if (use.length === 2 && !z.both) {
-                // 端の点を除いて 2 点しか残らない場合も、速球ルールで同一物体を確認
-                if (!(settled && fastTwoPoint(use, st))) return null;
+                if (!(fastTwoPoint(use, st) && (!!settled || st.dx >= roiW * 0.28))) return null;
             }
             if (!z.both && st.dx < needDx()) return null;
             if (st.dx < st.dy * o.dyRatio) return null;
