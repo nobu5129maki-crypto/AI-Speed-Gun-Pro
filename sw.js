@@ -1,15 +1,15 @@
 /* AI Speed Gun Pro — offline shell for installable PWA */
-const CACHE_VERSION = 'aispeedgun-v7.3.0';
+const CACHE_VERSION = 'aispeedgun-v7.3.1';
 const PRECACHE = [
-  '/',
-  '/index.html',
-  '/detector.js',
-  '/manifest.webmanifest',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/icon-180.png',
-  '/icons/apple-touch-icon.png',
-  '/speed-gun-icon.svg'
+  './',
+  './index.html',
+  './detector.js',
+  './manifest.webmanifest',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-180.png',
+  './icons/apple-touch-icon.png',
+  './speed-gun-icon.svg'
 ];
 
 self.addEventListener('install', (event) => {
@@ -32,11 +32,13 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
+  const scopePath = new URL('./', self.location).pathname;
+  if (url.pathname !== scopePath && !url.pathname.startsWith(scopePath)) return;
 
   // App shell: network first, fall back to cache (keeps updates fresh)
   if (
     request.mode === 'navigate' ||
-    url.pathname === '/' ||
+    url.pathname === scopePath ||
     url.pathname.endsWith('.html') ||
     url.pathname.endsWith('.webmanifest') ||
     url.pathname.endsWith('.js')
@@ -48,7 +50,7 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
           return response;
         })
-        .catch(() => caches.match(request).then((hit) => hit || caches.match('/index.html')))
+        .catch(() => caches.match(request).then((hit) => hit || caches.match(new URL('./index.html', self.location).href)))
     );
     return;
   }

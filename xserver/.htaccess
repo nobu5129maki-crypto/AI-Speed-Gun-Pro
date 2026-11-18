@@ -1,0 +1,44 @@
+# 入口は index.php のログイン画面。中身はログイン後だけ gate.php が渡す。
+DirectoryIndex index.php
+Options -Indexes -MultiViews
+
+<FilesMatch "^(auth\.php|index\.html)$">
+  Require all denied
+</FilesMatch>
+
+RewriteEngine On
+RewriteRule ^index\.php$ - [L]
+RewriteRule ^gate\.php$ - [L]
+# ホーム画面への追加は、Chrome がログインのクッキーなしで取りに来る。
+# マニフェスト、192/512（maskable も同じファイル）、サービスワーカーだけ公開する。
+RewriteRule ^manifest\.webmanifest$ - [L]
+RewriteRule ^sw\.js$ - [L]
+RewriteRule ^icons/icon-192\.png$ - [L]
+RewriteRule ^icons/icon-512\.png$ - [L]
+RewriteRule ^auth\.php$ - [F,L]
+RewriteRule ^index\.html$ - [F,L]
+RewriteRule ^$ index.php [L]
+RewriteRule ^(.*)$ gate.php?mw_path=$1 [B,L,QSA]
+
+<IfModule mod_mime.c>
+  AddType application/manifest+json .webmanifest
+  AddType application/javascript .js
+  AddType image/png .png
+  AddType image/svg+xml .svg
+  <Files "manifest.webmanifest">
+    ForceType application/manifest+json
+  </Files>
+</IfModule>
+
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+  <Files "manifest.webmanifest">
+    Header set Content-Type "application/manifest+json; charset=UTF-8"
+    Header set Cache-Control "public, max-age=3600"
+  </Files>
+  <Files "sw.js">
+    Header set Content-Type "application/javascript; charset=UTF-8"
+    Header set Cache-Control "no-cache"
+  </Files>
+</IfModule>
